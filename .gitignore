@@ -1,0 +1,4 @@
+# Archivos de datos: no subirlos al repositorio público
+*.xlsx
+*.xls
+*.csv
