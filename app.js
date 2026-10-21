@@ -257,8 +257,8 @@ function setCarrera(c){
 function setGrado(g){
   grado=g||null;
   document.querySelectorAll("#segGrado button").forEach(b=>b.setAttribute("aria-pressed", String(b.dataset.v===grado)));
-  if(grado && grado!=="Ya acabo el colegio") $("#fEgreso").value=egresoDe(grado);
-  else if(grado==="Ya acabo el colegio" && Number($("#fEgreso").value)>=eventYear()) $("#fEgreso").value="";
+  // 5to = año del evento, 4to = +1, 3ero = +2, ya acabó = año anterior (editable)
+  if(grado) $("#fEgreso").value = grado==="Ya acabo el colegio" ? eventYear()-1 : egresoDe(grado);
 }
 function renderAcomp(){
   $("#acompList").innerHTML = acomp.map((a,i)=>`<div class="arow">

@@ -118,6 +118,9 @@ th,td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:center;ver
 th{font-size:12px;color:var(--muted);font-weight:700;background:#fafbfd;letter-spacing:.02em}
 tr:last-child td{border-bottom:0}
 .corte td.n,.corte th.n{text-align:center}
+.gradorow{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-end}
+.gradorow .f{gap:8px}
+.gradorow .egreso{width:140px}
 .notes{list-style:none;margin:0;padding:0;color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:2px}
 .corte.carrera tr.grpstart td{border-top:2px solid var(--line-strong)}
 .corte.carrera td.mundo{font-weight:700;color:var(--blue);font-size:12px;letter-spacing:.03em}
@@ -262,12 +265,16 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
               <label class="f"><span>ID Prometeo</span><input type="text" id="fProm" inputmode="numeric"></label>
             </div>
 
-            <div class="sect">¿En qué grado está? *</div>
-            <div class="seg" id="segGrado">
-              <button type="button" class="nv" data-v="3ero" aria-pressed="false">3ero</button>
-              <button type="button" class="nv" data-v="4to" aria-pressed="false">4to</button>
-              <button type="button" data-v="5to" aria-pressed="false">5to</button>
-              <button type="button" data-v="Ya acabo el colegio" aria-pressed="false">Ya acabó el colegio</button>
+            <div class="gradorow">
+              <div class="f"><span class="sect">¿En qué grado está? *</span>
+                <div class="seg" id="segGrado">
+                  <button type="button" class="nv" data-v="3ero" aria-pressed="false">3ero</button>
+                  <button type="button" class="nv" data-v="4to" aria-pressed="false">4to</button>
+                  <button type="button" data-v="5to" aria-pressed="false">5to</button>
+                  <button type="button" data-v="Ya acabo el colegio" aria-pressed="false">Ya acabó el colegio</button>
+                </div>
+              </div>
+              <label class="f egreso"><span>Año de egreso</span><input type="number" id="fEgreso" min="1990" max="2040"></label>
             </div>
 
             <div class="sect">Colegio</div>
@@ -275,8 +282,7 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
               <label class="f"><span>Cód. modular</span><input type="text" id="fCod" inputmode="numeric" placeholder="Completa el colegio"></label>
               <div class="f combo"><label class="f"><span>Distrito</span><input type="text" id="fDistrito" placeholder="Filtra colegios"></label><div class="pop" id="popDistrito" hidden></div></div>
               <div class="f s2 combo"><label class="f"><span>Nombre del colegio</span><input type="text" id="fCole" placeholder="Escribe para buscar"></label><div class="pop" id="popCole" hidden></div></div>
-              <label class="f"><span>Año de egreso</span><input type="number" id="fEgreso" min="1990" max="2040"></label>
-              <p class="hint s2" id="coleHint" style="margin:0;align-self:end"></p>
+              <p class="hint s4" id="coleHint" style="margin:0"></p>
             </div>
 
             <div class="sect">Acompañantes</div>
