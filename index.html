@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Registro Explora UCAL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: barra de evento + pestañas subrayadas (estilo del sistema de admisión); registro a la izquierda, corte en vivo a la derecha */
+:root{
+  --bg:#f3f5f9; --card:#ffffff; --line:#e3e7ef; --line-strong:#cfd6e3;
+  --ink:#1c2433; --muted:#6b7385; --soft:#eef2fa;
+  --blue:#0f47a8; --blue-ink:#0b3a8c; --blue-soft:#e7eefb;
+  --ok:#12805c; --ok-soft:#e3f5ed; --warn:#a15c00; --warn-soft:#fdf1df; --bad:#b42318; --bad-soft:#fde8e6;
+  --font:"Figtree",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --r:10px;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45}
+button,input,select{font:inherit;color:inherit}
+.wrap{max-width:1240px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:18px 40px;display:flex;flex-direction:column;gap:16px}
+.num{font-variant-numeric:tabular-nums}
+
+/* Top bar */
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:12px;justify-content:space-between}
+.brand{display:flex;flex-direction:column;gap:2px}
+.brand small{color:var(--muted);font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:600}
+.brand h1{margin:0;font-size:20px;font-weight:700;text-wrap:balance}
+.evbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.evbar select{min-width:220px}
+
+/* Panel with tabs */
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tabs{display:flex;gap:4px;border-bottom:2px solid var(--line);padding-inline:12px;overflow-x:auto}
+.tab{appearance:none;border:0;background:none;padding:14px 20px 12px;font-size:16px;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;white-space:nowrap}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--blue);border-bottom-color:var(--blue);font-weight:500}
+.tab .count{font-size:12px;background:var(--soft);color:var(--muted);border-radius:99px;padding:1px 8px;margin-left:6px}
+.tab[aria-selected="true"] .count{background:var(--blue-soft);color:var(--blue)}
+.view{padding:18px}
+
+/* Inputs */
+label.f{display:flex;flex-direction:column;gap:4px;min-width:0}
+label.f>span{font-size:12px;color:var(--muted);font-weight:600}
+input[type=text],input[type=tel],input[type=date],input[type=time],input[type=search],input[type=number],select{
+  height:38px;border:1px solid var(--line-strong);border-radius:8px;padding:0 10px;background:#fff;width:100%;min-width:0}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--blue);outline-offset:1px;border-color:var(--blue)}
+.btn{appearance:none;height:38px;padding:0 14px;border-radius:8px;border:1px solid var(--line-strong);background:#fff;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:var(--soft)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.primary:hover{background:var(--blue-ink)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--blue)}
+.btn.ghost:hover{background:var(--blue-soft)}
+.btn.danger{color:var(--bad);border-color:#f2c4bf}
+.btn.danger:hover{background:var(--bad-soft)}
+.btn.sm{height:30px;padding:0 10px;font-size:13px}
+.btn.big{height:46px;font-size:16px;padding:0 22px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* Registro layout */
+.reg{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px;align-items:start}
+@media (max-width:900px){.reg{grid-template-columns:1fr}}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.results{border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.results:empty{display:none}
+.res{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;background:#fff;width:100%;text-align:left;border-left:0;border-right:0;border-top:0}
+.res:last-child{border-bottom:0}
+.res:hover,.res.active{background:var(--blue-soft)}
+.res b{font-weight:600}
+.res .sub{color:var(--muted);font-size:12px}
+.hint{color:var(--muted);font-size:12px}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;border-radius:99px;padding:2px 9px;white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.pend{background:var(--soft);color:var(--muted)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.blue{background:var(--blue-soft);color:var(--blue)}
+
+.form{border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:14px}
+.formhead{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.formhead h2{margin:0;font-size:16px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(4,minmax(0,1fr))}
+.s2{grid-column:span 2}.s4{grid-column:1/-1}
+@media (max-width:640px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.s2{grid-column:1/-1}}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg button{appearance:none;height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--line-strong);background:#fff;cursor:pointer;font-weight:500}
+.seg button[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:#fff}
+.seg button.nv[aria-pressed="true"]{background:var(--warn);border-color:var(--warn)}
+.sect{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:2px 0 -4px}
+.acomp{display:flex;flex-direction:column;gap:8px}
+.arow{display:grid;grid-template-columns:120px minmax(0,1fr) 150px auto;gap:8px;align-items:center}
+@media (max-width:640px){.arow{grid-template-columns:1fr 1fr}.arow .an{grid-column:1/-1}}
+.addacomp{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line);padding-top:14px}
+.mundo-tag{font-size:12px;font-weight:700;color:var(--blue);letter-spacing:.04em}
+
+/* Corte en vivo */
+.live{border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px;position:sticky;top:12px;background:#fff}
+.live h3{margin:0;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+.bigtotal{display:flex;align-items:baseline;gap:8px}
+.bigtotal b{font-size:40px;line-height:1;font-weight:700;color:var(--blue)}
+.bigtotal span{color:var(--muted)}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.split div{background:var(--soft);border-radius:8px;padding:8px 10px}
+.split b{font-size:18px;display:block}
+.split span{font-size:12px;color:var(--muted)}
+.mbars{display:flex;flex-direction:column;gap:7px}
+.mbar{display:grid;grid-template-columns:118px minmax(0,1fr) 34px;gap:8px;align-items:center;font-size:12px}
+.mbar .track{height:8px;background:var(--soft);border-radius:99px;overflow:hidden}
+.mbar .fill{height:100%;background:var(--blue);border-radius:99px}
+.mbar b{text-align:right}
+
+/* Tables */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r)}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{font-size:12px;color:var(--muted);font-weight:700;background:#fafbfd;letter-spacing:.02em}
+tr:last-child td{border-bottom:0}
+.corte td.n,.corte th.n{text-align:right}
+.corte tr.tot td{font-weight:700;background:var(--blue-soft);color:var(--blue-ink)}
+.corte td.rowtot{font-weight:700}
+.corte tr.sub td:first-child{padding-left:26px;color:var(--muted)}
+.lista td.wrap{white-space:normal;min-width:180px}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;justify-content:space-between}
+.toolbar .left,.toolbar .right{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
+.corte-title{margin:0;font-size:18px}
+.note{color:var(--muted);font-size:12px;margin:0}
+.cortes-list{display:flex;flex-direction:column;gap:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.empty{padding:28px;text-align:center;color:var(--muted);border:1px dashed var(--line-strong);border-radius:var(--r);display:flex;flex-direction:column;gap:10px;align-items:center}
+.empty b{color:var(--ink);font-size:15px}
+
+.newev{display:flex;flex-wrap:wrap;gap:8px;align-items:end;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:12px}
+.newev label{flex:1 1 180px}
+
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:#fff;padding:11px 16px;border-radius:10px;font-weight:600;box-shadow:0 8px 24px rgba(20,30,50,.18);z-index:20;max-width:calc(100% - 32px)}
+.toast.ok{background:var(--ok)}
+.toast.bad{background:var(--bad)}
+.banner{background:var(--warn-soft);color:var(--warn);border-radius:var(--r);padding:10px 14px;font-weight:500}
+kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:#fff;color:var(--muted)}
+@media (prefers-reduced-motion:no-preference){.mbar .fill{transition:width .3s ease}}
+
+/* Login y estado de conexión */
+.login{min-height:100vh;display:grid;place-items:center;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px}
+.login-card{width:100%;max-width:400px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;display:flex;flex-direction:column;gap:16px}
+.login-card h1{margin:0;font-size:22px}
+.login-card form{display:flex;flex-direction:column;gap:12px}
+.login-card .btn{justify-content:center}
+.msg{color:var(--bad);font-size:13px;min-height:1em;margin:0}
+.userchip{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--line-strong);display:inline-block}
+.dot[data-on="1"]{background:var(--ok)}
+</style>
+<style>[hidden]{display:none!important} body{margin:0} input[type=password]{height:38px;border:1px solid var(--line-strong);border-radius:8px;padding:0 10px;background:#fff;width:100%}</style>
+</head>
+<body>
+<main class="login" id="login" hidden>
+  <div class="login-card">
+    <div class="brand"><small>Admisión UCAL · Pregrado</small><h1>Registro de asistentes</h1></div>
+    <form id="loginForm">
+      <label class="f"><span>Correo UCAL</span><input type="text" id="lEmail" inputmode="email" autocomplete="username" placeholder="nombre@ucal.edu.pe" required></label>
+      <label class="f"><span>Contraseña</span><input type="password" id="lPass" autocomplete="current-password"></label>
+      <button class="btn primary big" id="btnLogin" type="submit">Ingresar</button>
+      <button class="btn ghost" id="btnMagic" type="button">Enviarme un enlace de acceso al correo</button>
+    </form>
+    <p class="msg" id="loginMsg"></p>
+  </div>
+</main>
+<div id="app" hidden>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <small>Admisión UCAL · Pregrado</small>
+      <h1 id="evTitle">Registro de asistentes</h1>
+    </div>
+    <div class="evbar">
+      <label class="f" style="flex-direction:row;align-items:center;gap:8px"><span>Evento</span>
+        <select id="evSelect" aria-label="Evento"></select></label>
+      <button class="btn" id="btnNewEv" type="button">+ Nuevo evento</button>
+      <span class="userchip"><span class="dot" id="syncDot" title="Conectando…"></span><span id="userEmail"></span><button class="btn sm ghost" id="btnLogout" type="button">Salir</button></span>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <form id="newEvForm" class="newev" hidden>
+    <label class="f"><span>Nombre del evento</span><input type="text" id="nevName" placeholder="Explora 23.05.26" required></label>
+    <label class="f" style="flex:0 1 170px"><span>Fecha</span><input type="date" id="nevDate" required></label>
+    <button class="btn primary" type="submit">Crear evento</button>
+    <button class="btn ghost" type="button" id="nevCancel">Cancelar</button>
+  </form>
+
+  <section class="panel">
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="registro" aria-selected="true">Registro</button>
+      <button class="tab" role="tab" data-tab="corte" aria-selected="false">Corte</button>
+      <button class="tab" role="tab" data-tab="lista" aria-selected="false">Asistentes <span class="count num" id="cntAsis">0</span></button>
+    </nav>
+
+    <!-- REGISTRO -->
+    <div class="view" id="v-registro">
+      <div class="reg">
+        <div class="col">
+          <div class="hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> registra la llegada · <kbd>Esc</kbd> limpia el formulario</div>
+
+          <form class="form" id="regForm" autocomplete="off">
+            <div class="formhead">
+              <h2 id="formTitle">Nuevo asistente</h2>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <span id="formStatus"></span>
+                <button class="btn sm ghost" type="button" id="btnClear">Limpiar</button>
+              </div>
+            </div>
+
+            <div class="grid">
+              <label class="f s2"><span>Nombres y apellidos *</span><input type="text" id="fNombre" required></label>
+              <label class="f"><span>Celular *</span><input type="tel" id="fCel" inputmode="numeric" required></label>
+              <label class="f"><span>DNI</span><input type="text" id="fDni" inputmode="numeric"></label>
+              <label class="f s2"><span>Carrera *</span><select id="fCarrera" required></select></label>
+              <label class="f"><span>Mundo</span><input type="text" id="fMundo" readonly tabindex="-1" placeholder="Se completa solo"></label>
+              <label class="f"><span>ID Prometeo</span><input type="text" id="fProm" inputmode="numeric"></label>
+            </div>
+
+            <div class="sect">¿En qué grado está? *</div>
+            <div class="seg" id="segGrado">
+              <button type="button" data-v="5to" aria-pressed="false">5to</button>
+              <button type="button" data-v="Ya acabo el colegio" aria-pressed="false">Ya acabó el colegio</button>
+              <button type="button" class="nv" data-v="4to" aria-pressed="false">4to</button>
+              <button type="button" class="nv" data-v="3ero" aria-pressed="false">3ero</button>
+            </div>
+
+            <div class="grid">
+              <label class="f s2"><span>Nombre del colegio</span><input type="text" id="fCole"></label>
+              <label class="f"><span>Cód. modular</span><input type="text" id="fCod" inputmode="numeric"></label>
+              <label class="f"><span>Año de egreso</span><input type="number" id="fEgreso" min="1990" max="2040"></label>
+            </div>
+
+            <div class="sect">Acompañantes</div>
+            <div class="acomp" id="acompList"></div>
+            <div class="addacomp" id="addAcomp">
+              <span class="hint">Agregar:</span>
+              <button type="button" class="btn sm" data-t="Madre">+ Madre</button>
+              <button type="button" class="btn sm" data-t="Padre">+ Padre</button>
+              <button type="button" class="btn sm" data-t="Familiar">+ Familiar</button>
+              <button type="button" class="btn sm" data-t="Estudiante">+ Amigo/estudiante</button>
+            </div>
+
+            <div class="actions">
+              <label class="f" style="flex:0 1 200px"><span>Registrador *</span>
+                <input type="text" id="fRegistrador" list="regList" required placeholder="Tu nombre"></label>
+              <datalist id="regList"></datalist>
+              <button class="btn big primary" type="submit" id="btnSave">Registrar llegada</button>
+            </div>
+          </form>
+        </div>
+
+        <aside class="live" aria-live="polite">
+          <h3><span>Corte en vivo</span><span class="hint num" id="liveTime"></span></h3>
+          <div class="bigtotal"><b class="num" id="liveTotal">0</b><span>asistentes (padres + alumnos)</span></div>
+          <div class="split">
+            <div><b class="num" id="liveAlum">0</b><span>Alumnos</span></div>
+            <div><b class="num" id="livePad">0</b><span>Padres y familiares</span></div>
+            <div><b class="num" id="liveVend">0</b><span>Vendibles (5to + egres.)</span></div>
+            <div><b class="num" id="liveNV">0</b><span>No vendibles (3ero/4to)</span></div>
+          </div>
+          <div class="mbars" id="liveBars"></div>
+          <button class="btn sm" type="button" data-goto="corte">Ver corte completo</button>
+        </aside>
+      </div>
+    </div>
+
+    <!-- CORTE -->
+    <div class="view" id="v-corte" hidden>
+      <div class="col">
+        <div class="toolbar">
+          <div class="left">
+            <label class="f" style="width:150px"><span>Corte a las</span><input type="time" id="corteHora"></label>
+            <button class="btn" type="button" id="btnAhora">Hasta ahora</button>
+          </div>
+          <div class="right">
+            <button class="btn" type="button" id="btnCopy">Copiar para WhatsApp</button>
+            <button class="btn" type="button" id="btnSaveCorte">Guardar corte</button>
+            <button class="btn primary" type="button" id="btnExportCorte">Descargar Excel</button>
+          </div>
+        </div>
+        <h2 class="corte-title" id="corteTitle">Total asistentes</h2>
+        <div class="tablewrap"><table class="corte" id="corteTable"></table></div>
+        <p class="note">El Excel trae dos hojas: Corte (esta tabla) y Registros (las columnas de la plantilla Explora más la hora de llegada). Alumnos egresados: ya acabaron el colegio. No vendibles: 3ero o 4to de secundaria. Padres: acompañantes registrados como madre, padre o familiar.</p>
+        <div class="sect" style="margin-top:8px">Cortes guardados</div>
+        <div class="cortes-list" id="cortesList"></div>
+      </div>
+    </div>
+
+    <!-- LISTA -->
+    <div class="view" id="v-lista" hidden>
+      <div class="col">
+        <div class="toolbar">
+          <div class="left" style="flex:1 1 260px;max-width:420px">
+            <div style="flex:1;min-width:0"><input type="search" id="qLista" placeholder="Buscar por nombre, celular, DNI, carrera…"></div>
+          </div>
+          <div class="right"><button class="btn primary" type="button" id="btnExportAll">Descargar Excel</button></div>
+        </div>
+        <div class="tablewrap"><table class="lista" id="listaTable"></table></div>
+      </div>
+    </div>
+
+  </section>
+</div>
+
+
+</div>
+<div class="toast" id="toast" hidden></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
