@@ -881,12 +881,29 @@ function bindUI(){
   let correoPendiente="";
   function modo(m){
     ["loginForm","signupForm","resetForm","newPassForm"].forEach(id=>$("#"+id).hidden = id!==m+"Form");
+    document.querySelectorAll("#login .pw input").forEach(i=>{ if(i.type!=="password") i.parentNode.querySelector(".ojo")?.click(); });
     $("#loginTitle").textContent={login:"Registro de asistentes",signup:"Crear mi acceso",reset:"Recuperar contraseña",newPass:"Nueva contraseña"}[m];
     $("#btnResend").hidden=true; msg("");
     const e=$("#lEmail").value.trim(); if(e){ $("#sEmail").value=$("#sEmail").value||e; $("#rEmail").value=$("#rEmail").value||e; }
   }
   window.__modoLogin=modo;
   document.querySelectorAll("[data-modo]").forEach(b=>b.addEventListener("click",()=>modo(b.dataset.modo)));
+
+  // Botón "ojo" para ver u ocultar la contraseña
+  const OJO='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const OJO_NO='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.9 17.9A10.4 10.4 0 0 1 12 19c-6.5 0-10-7-10-7a18 18 0 0 1 4.2-5.1M9.9 5.2A9.7 9.7 0 0 1 12 5c6.5 0 10 7 10 7a18.3 18.3 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M2 2l20 20"/></svg>';
+  document.querySelectorAll('#login input[type="password"]').forEach(inp=>{
+    const wrap=document.createElement("div"); wrap.className="pw";
+    inp.parentNode.insertBefore(wrap,inp); wrap.appendChild(inp);
+    const b=document.createElement("button"); b.type="button"; b.className="ojo"; b.innerHTML=OJO;
+    b.setAttribute("aria-label","Mostrar contraseña"); b.title="Mostrar contraseña";
+    b.addEventListener("click",()=>{
+      const ver=inp.type==="password"; inp.type=ver?"text":"password";
+      b.innerHTML=ver?OJO_NO:OJO; const t=ver?"Ocultar contraseña":"Mostrar contraseña"; b.setAttribute("aria-label",t); b.title=t;
+      inp.focus({preventScroll:true});
+    });
+    wrap.appendChild(b);
+  });
 
   $("#loginForm").addEventListener("submit",async e=>{
     e.preventDefault(); msg("");
