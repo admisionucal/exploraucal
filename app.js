@@ -22,6 +22,9 @@ const CARRERAS = {
   "Psicología":"PSICOLOGIA"
 };
 const PADRES = new Set(["Madre","Padre","Familiar"]);
+const NO_DEF = "No definido";          // más de una carrera o ninguna
+const MUNDO_NO_DEF = "NO DEFINIDO";    // mundo cuando tampoco se eligió mundo
+const todasCarreras = () => [...Object.keys(CARRERAS), NO_DEF];
 const GRADOS = ["3ero","4to","5to","Ya acabo el colegio"];
 
 /* Columnas que reconoce la importación (se comparan sin tildes, mayúsculas ni signos) */
@@ -128,10 +131,9 @@ function combo(input, pop, getOptions, onPick, opts={}){
   let seq=0;
   const render=async()=>{
     const my=++seq;
-    if(opts.loading && opts.loading(input.value)){ pop.innerHTML=`<div class="optgrp">${esc(opts.loading(input.value))}</div>`; pop.hidden=false; pop._groups=[]; }
     const groups=await getOptions(input.value);
     if(my!==seq) return;   // llegó una respuesta vieja
-    const html=groups.map(g=>(g.title?`<div class="optgrp">${esc(g.title)}</div>`:"")+g.items.map((o,i)=>`<button type="button" class="opt" data-g="${groups.indexOf(g)}" data-i="${i}"><span>${esc(o.label)}</span>${o.sub?`<small>${esc(o.sub)}</small>`:""}</button>`).join("")).join("");
+    const html=groups.map(g=>(g.title?`<div class="optgrp">${esc(g.title)}</div>`:"")+g.items.map((o,i)=>`<button type="button" class="opt${o.stack?" stack":""}" data-g="${groups.indexOf(g)}" data-i="${i}"><span>${esc(o.label)}</span>${o.sub?`<small>${esc(o.sub)}</small>`:""}</button>`).join("")).join("");
     pop.innerHTML=html; pop.hidden=!html; pop._groups=groups;
   };
   let hideT=null;
@@ -151,21 +153,22 @@ function corteLimit(){
 }
 function computeCorte(limit){
   const cols=[...MUNDOS];
-  if(regs.some(r=>r.asistio && !MUNDOS.includes(r.mundo))) cols.push("SIN CARRERA");
+  if(regs.some(r=>r.asistio && !MUNDOS.includes(r.mundo))) cols.push(MUNDO_NO_DEF);
   const z=()=>Object.fromEntries(cols.map(c=>[c,0]));
   const t={padres:z(),otros:z(),egresados:z(),quinto:z(),nv:z(),singrado:z()};
   const car={}, ase={}; // por carrera y por asesor
   for(const r of regs){
     if(!r.asistio) continue;
     if(limit && r.hora && new Date(r.hora) > limit) continue;
-    const m = MUNDOS.includes(r.mundo) ? r.mundo : "SIN CARRERA";
+    const m = MUNDOS.includes(r.mundo) ? r.mundo : MUNDO_NO_DEF;
     if(r.grado==="Ya acabo el colegio") t.egresados[m]++;
     else if(r.grado==="5to") t.quinto[m]++;
     else if(r.grado==="3ero"||r.grado==="4to") t.nv[m]++;
     else t.singrado[m]++;
     for(const a of (r.acomp||[])){ if(PADRES.has(a.tipo)) t.padres[m]++; else t.otros[m]++; }
-    const ck=r.carrera||"Sin carrera";
-    const k=car[ck]=car[ck]||{carrera:ck,mundo:CARRERAS[ck]||m,padres:0,otros:0,egresados:0,quinto:0,nv:0,singrado:0};
+    const cn=CARRERAS[r.carrera] ? r.carrera : NO_DEF;          // "No definido" se agrupa dentro de su mundo
+    const ck=cn+"|"+(CARRERAS[cn]||m);
+    const k=car[ck]=car[ck]||{carrera:cn,mundo:CARRERAS[cn]||m,padres:0,otros:0,egresados:0,quinto:0,nv:0,singrado:0};
     if(r.grado==="Ya acabo el colegio") k.egresados++; else if(r.grado==="5to") k.quinto++; else if(r.grado==="3ero"||r.grado==="4to") k.nv++; else k.singrado++;
     for(const a of (r.acomp||[])){ if(PADRES.has(a.tipo)) k.padres++; else k.otros++; }
     const ak=(r.asesor||"").trim()||"Sin asesor";
@@ -250,28 +253,29 @@ function corteText(){
 }
 /* ================= Formulario ================= */
 function fillMundos(){
-  $("#fMundo").innerHTML=`<option value="">Todos los mundos</option>`+MUNDOS.map(m=>`<option>${m}</option>`).join("");
+  $("#fMundo").innerHTML=`<option value="">Todos los mundos</option>`+[...MUNDOS,MUNDO_NO_DEF].map(m=>`<option>${m}</option>`).join("");
 }
-function carreraExacta(txt){ const n=norm(txt); return Object.keys(CARRERAS).find(c=>norm(c)===n) || ""; }
+function carreraExacta(txt){ const n=norm(txt); return todasCarreras().find(c=>norm(c)===n) || ""; }
 function carreraParecida(txt){
   if(!norm(txt)) return "";
   const exact=carreraExacta(txt); if(exact) return exact;
-  let best="", bs=0; for(const c of Object.keys(CARRERAS)){ const s=textScore(txt,c); if(s>bs){bs=s;best=c;} }
+  let best="", bs=0; for(const c of todasCarreras()){ const s=textScore(txt,c); if(s>bs){bs=s;best=c;} }
   return bs>=0.75 ? best : "";
 }
 function carreraOptions(q){
   const mundo=$("#fMundo").value;
   const list=Object.keys(CARRERAS).filter(c=>!mundo || CARRERAS[c]===mundo);
+  const nd={title:"Más de una carrera o ninguna",items:[{label:NO_DEF,value:NO_DEF,sub:mundo&&mundo!==MUNDO_NO_DEF?"se queda en "+mundo:"mundo: NO DEFINIDO"}]};
   const qn=norm(q); const exact=carreraExacta(q);
   if(!qn || exact){
     const byM={}; list.forEach(c=>(byM[CARRERAS[c]]=byM[CARRERAS[c]]||[]).push({label:c,value:c}));
-    return MUNDOS.filter(m=>byM[m]).map(m=>({title:m,items:byM[m]}));
+    return [...MUNDOS.filter(m=>byM[m]).map(m=>({title:m,items:byM[m]})), nd];
   }
-  const rank=arr=>arr.map(c=>({label:c,value:c,sub:CARRERAS[c],s:textScore(q,c)})).filter(o=>o.s>=0.45).sort((a,b)=>b.s-a.s);
-  const items=rank(list);
+  const rank=arr=>arr.map(c=>({label:c,value:c,sub:CARRERAS[c]||"",s:textScore(q,c)})).filter(o=>o.s>=0.45).sort((a,b)=>b.s-a.s);
+  const items=rank([...list,NO_DEF]);
   if(items.length) return [{items}];
   const otros=rank(Object.keys(CARRERAS).filter(c=>!list.includes(c)));
-  return otros.length?[{title:"En otros mundos",items:otros}]:[];
+  return otros.length?[{title:"En otros mundos",items:otros},nd]:[nd];
 }
 function setCarrera(c){
   $("#fCarrera").value=c||"";
@@ -296,6 +300,7 @@ function clearForm(){
   ["fNombre","fCel","fDni","fProm","fAsesor","fSubcanal","fCole","fCod","fDistrito","fEgreso","fCarrera"].forEach(id=>$("#"+id).value=""); selDist=null;
   $("#fMundo").value=""; setGrado(null); acomp=[]; renderAcomp(); coleHint(); promHint();
   $("#formTitle").textContent="Nuevo asistente"; $("#formStatus").innerHTML="";
+  Object.keys(IND).forEach(f=>{ indSeq[f]=(indSeq[f]||0)+1; setInd(f,""); });
   document.querySelectorAll("#regForm .err").forEach(f=>f.classList.remove("err")); document.querySelectorAll("#regForm .errmsg").forEach(m=>m.textContent="");
   $("#btnSave").textContent="Registrar llegada";
 }
@@ -304,7 +309,7 @@ function loadIntoForm(r){
   $("#fNombre").value=r.nombre||""; $("#fCel").value=r.celular||""; $("#fDni").value=r.dni||""; $("#fProm").value=r.id_prometeo||""; $("#fAsesor").value=r.asesor||""; $("#fSubcanal").value=r.subcanal||"";
   promHint();
   if(!r.asesor){ if(r.id_prometeo) autoFillExact("prom", r.id_prometeo); else if(r.celular) autoFillExact("cel", r.celular); }
-  $("#fMundo").value=MUNDOS.includes(r.mundo)?r.mundo:""; setCarrera(carreraExacta(r.carrera)||r.carrera||"");
+  $("#fMundo").value=MUNDOS.includes(r.mundo)||r.mundo===MUNDO_NO_DEF?r.mundo:""; setCarrera(carreraExacta(r.carrera)||r.carrera||"");
   $("#fCod").value=r.cod_modular||""; $("#fCole").value=r.colegio||""; $("#fDistrito").value=r.distrito||""; selDist=colByCod.get(codMod(r.cod_modular))?._k||null;
   $("#fEgreso").value=r.egreso||""; setGrado(r.grado||null); if(r.egreso) $("#fEgreso").value=r.egreso;
   if(r.cod_modular && !r.colegio) fillFromCod(); coleHint();
@@ -353,7 +358,7 @@ async function saveForm(ev){
   const prev = editingId ? regs.find(r=>r.id===editingId) : null;
   const data={
     evento_id:eid, nombre, celular:cel, dni, id_prometeo:digits($("#fProm").value), asesor:$("#fAsesor").value.trim(), subcanal:$("#fSubcanal").value.trim(),
-    carrera, mundo:CARRERAS[carrera], grado, egreso:Number($("#fEgreso").value)||null,
+    carrera, mundo: carrera===NO_DEF ? (MUNDOS.includes($("#fMundo").value) ? $("#fMundo").value : MUNDO_NO_DEF) : CARRERAS[carrera], grado, egreso:Number($("#fEgreso").value)||null,
     colegio:$("#fCole").value.trim(), cod_modular:codMod($("#fCod").value), distrito:$("#fDistrito").value.trim(),
     acomp:acomp.filter(a=>a.nombre.trim()||a.celular.trim()).map(a=>({tipo:a.tipo,nombre:a.nombre.trim(),celular:digits(a.celular)})),
     confirmo:prev?.confirmo||"", origen:prev?.origen||"walkin",
@@ -390,12 +395,43 @@ async function prometeoSearch(field, q){
     const r={items:out.items||[]}; promCache.set(key,r); return r;
   }catch(e){ console.error(e); return {items:[], error:"sin conexión con la base Prometeo"}; }
 }
+/* Indicador junto a la etiqueta: girando mientras busca, ✓ si encuentra, ✗ si no */
+const IND={prom:"#indProm",nombre:"#indNombre",cel:"#indCel",dni:"#indDni"};
+const indSeq={};
+function setInd(field, estado, texto){
+  const el=$(IND[field]); if(!el) return;
+  el.className="ind"+(estado?" "+estado:""); el.textContent=texto||""; el.title=texto||"";
+}
+function busquedaApta(field,q){
+  if(!CFG.PROMETEO_URL || /PEGA_AQUI/.test(CFG.PROMETEO_URL)) return false;
+  return field==="nombre" ? norm(q).length>=4 : digits(q).length>=3;
+}
+async function buscarConIndicador(field,q){
+  if(!busquedaApta(field,q)){ setInd(field,""); return {items:[]}; }
+  const my=indSeq[field]=(indSeq[field]||0)+1;
+  setInd(field,"load","Buscando…");
+  const r=await prometeoSearch(field,q);
+  if(my!==indSeq[field]) return r;             // ya se escribió otra cosa
+  if(r.error) setInd(field,"err",r.error);
+  else if(r.items.length) setInd(field,"ok",`${r.items.length===8?"8+":r.items.length} en la base`);
+  else setInd(field,"no","No está en la base");
+  return r;
+}
+const fmtCel=c=>{ const d=digits(c); return d.length===9 ? d.replace(/(\d{3})(\d{3})(\d{3})/,"$1 $2 $3") : d; };
 function baseOptions(field){
   return async q=>{
-    const r=await prometeoSearch(field,q);
-    if(r.error) return [{title:"Base Prometeo: "+r.error, items:[]}];
-    const items=r.items.map(b=>({label:b.nombre||("ID "+b.id), sub:`ID ${b.id}${b.asesor?" · "+b.asesor:""}${field==="dni"&&b.dni?" · Doc. "+b.dni:b.celular?" · "+b.celular:""}`, b}));
-    return items.length?[{title:"Base Prometeo",items}]:[];
+    const r=await buscarConIndicador(field,q);
+    if(r.error || !r.items.length) return [];
+    const items=r.items.map(b=>{
+      // arriba: solo el dato que se busca · abajo: ID y número (y nombre si no es lo que se busca)
+      const abajo=[field!=="nombre"&&b.nombre?b.nombre:"", field!=="prom"?"ID "+b.id:"", field!=="cel"&&b.celular?"Cel. "+fmtCel(b.celular):""].filter(Boolean).join(" · ");
+      const arriba= field==="nombre" ? (b.nombre||"ID "+b.id)
+                  : field==="prom" ? "ID "+b.id
+                  : field==="dni" ? "Doc. "+(b.dni||digits(q))
+                  : fmtCel(b.viaFamiliar ? digits(q) : (b.celular||digits(q)))+(b.viaFamiliar&&b.via?` (${b.via})`:"");
+      return {label:arriba, sub:abajo, stack:true, b};
+    });
+    return [{title:"Base Prometeo",items}];
   };
 }
 function pickBase(b, field){
@@ -417,10 +453,10 @@ function showChooser(items, field, tag, v){
 }
 function promHint(b, nota){
   const h=$("#promHint"); if(!h) return;
-  h.innerHTML = b ? `<span class="pill ok">✓ Base Prometeo</span> ID ${esc(b.id)}${b.asesor?` · Asesor: <b>${esc(b.asesor)}</b>`:""}${b.subcanal?` · Subcanal 2: ${esc(b.subcanal)}`:""}${nota?` · <span class="pill blue">${esc(nota)}</span>`:b.viaFamiliar&&b.via?` · <span class="pill blue">por ${esc(b.via)}</span>`:""}` : "";
+  h.innerHTML = b ? `<span class="pill ok">✓ Base Prometeo</span> ID ${esc(b.id)}${b.asesor?` · Asesor: <b>${esc(b.asesor)}</b>`:""}${!b.asesor&&b.status?` · <span class="pill warn">Sin asesor: status ${esc(b.status)}</span>`:""}${b.subcanal?` · Subcanal 2: ${esc(b.subcanal)}`:""}${nota?` · <span class="pill blue">${esc(nota)}</span>`:b.viaFamiliar&&b.via?` · <span class="pill blue">por ${esc(b.via)}</span>`:""}` : "";
 }
 async function autoFillExact(field, value, inputEl, tag){
-  const r=await prometeoSearch(field,value);
+  const r = (inputEl || tag==="acomp-exact") ? await prometeoSearch(field,value) : await buscarConIndicador(field,value);
   const v=digits(value), inp=inputEl || $({prom:"#fProm",cel:"#fCel",dni:"#fDni"}[field]);
   // en teléfono basta con que el número exista en alguna columna (alumno o familiar): el script ya filtró
   const exactas=r.items.filter(b=> field==="prom" ? digits(b.id)===v : field==="dni" ? digits(b.dni)===v : b.s===1);
@@ -523,10 +559,10 @@ function renderLista(){
     rows.map(r=>`<tr>
       <td>${r.asistio?`<span class="pill ok">${fmtHora(r.hora)}</span>`:`<span class="pill pend">${r.confirmo==="Si"?"Confirmó":"Pendiente"}</span>`}</td>
       <td class="num">${esc(r.id_prometeo||"—")}</td><td>${esc(r.asesor||"—")}</td><td>${esc(r.subcanal||"—")}</td>
-      <td class="wrap">${esc(r.nombre)}</td><td class="num">${esc(r.celular)}</td><td>${esc(r.carrera||"—")}</td><td>${esc(r.mundo||"—")}</td>
-      <td>${r.grado==="3ero"||r.grado==="4to"?`<span class="pill warn">${esc(r.grado)}</span>`:esc(gradoLabel(r.grado))}</td>
-      <td class="wrap">${esc(r.colegio||"—")}${r.distrito?`<div class="hint">${esc(r.distrito)}</div>`:""}</td>
-      <td class="wrap">${(r.acomp||[]).map(a=>esc(a.tipo)+(a.nombre?": "+esc(a.nombre):"")).join("<br>")||"—"}</td>
+      <td class="tw">${esc(r.nombre)}</td><td class="num">${esc(r.celular)}</td><td>${esc(r.carrera||"—")}</td><td>${esc(r.mundo||"—")}</td>
+      <td>${r.grado?`<span class="pill g-${r.grado==="Ya acabo el colegio"?"eg":r.grado==="5to"?"q5":"nv"}">${esc(gradoLabel(r.grado))}</span>`:"—"}</td>
+      <td class="tw">${esc(r.colegio||"—")}${r.distrito?`<div class="hint">${esc(r.distrito)}</div>`:""}</td>
+      <td class="tw">${(r.acomp||[]).map(a=>esc(a.tipo)+(a.nombre?": "+esc(a.nombre):"")).join("<br>")||"—"}</td>
       <td>${esc(r.registrador||"—")}</td>
       <td><div style="display:flex;gap:4px">
         <button class="btn sm ${r.asistio?"":"primary"}" data-edit="${esc(r.id)}">${r.asistio?"Editar":"Registrar llegada"}</button>
@@ -624,7 +660,7 @@ async function importInscritos(file){
   const get=(r,f)=>sh.map[f]!=null ? String(r[sh.map[f]]??"").trim() : "";
   const recs=sh.rows.map(r=>{
     const carrera=carreraParecida(get(r,"carrera")) || get(r,"carrera");
-    const mundoTxt=norm(get(r,"mundo")).toUpperCase(); const mundo=CARRERAS[carrera] || MUNDOS.find(m=>norm(m).toUpperCase()===mundoTxt) || "";
+    const mundoTxt=norm(get(r,"mundo")).toUpperCase(); const mundo=CARRERAS[carrera] || MUNDOS.find(m=>norm(m).toUpperCase()===mundoTxt) || (carrera===NO_DEF?MUNDO_NO_DEF:"");
     const acompArr=Object.keys(acIdx).sort().map(k=>acIdx[k]).map(a=>({tipo:a.tipo!=null?String(r[a.tipo]).trim():"",nombre:a.nombre!=null?String(r[a.nombre]).trim():"",celular:a.celular!=null?digits(r[a.celular]):""})).filter(a=>a.nombre||a.tipo).map(a=>({...a,tipo:["Madre","Padre","Familiar","Estudiante"].find(t=>norm(t)===norm(a.tipo))||"Familiar"}));
     const regis=get(r,"registrador"); const cod=codMod(get(r,"cod_modular")); const col=colByCod.get(cod);
     const idp=digits(get(r,"id_prometeo"));
@@ -749,11 +785,13 @@ function bindUI(){
   });
 
   // mundo ↔ carrera
-  const espera=field=>q=>{ if(!CFG.PROMETEO_URL || /PEGA_AQUI/.test(CFG.PROMETEO_URL)) return ""; const ok= field==="nombre" ? norm(q).length>=4 : digits(q).length>=3; const key=field+"|"+(field==="nombre"?norm(q):digits(q)); return ok && !promCache.has(key) ? "Buscando en la base Prometeo…" : ""; };
-  combo($("#fProm"),$("#popProm"),baseOptions("prom"),o=>pickBase(o.b,"prom"),{delay:450,loading:espera("prom")});
-  combo($("#fNombre"),$("#popNombre"),baseOptions("nombre"),o=>pickBase(o.b,"nombre"),{delay:600,loading:espera("nombre")});
-  combo($("#fCel"),$("#popCel"),baseOptions("cel"),o=>pickBase(o.b,"cel"),{delay:450,loading:espera("cel")});
-  combo($("#fDni"),$("#popDni"),baseOptions("dni"),o=>pickBase(o.b,"dni"),{delay:450,loading:espera("dni")});
+  combo($("#fProm"),$("#popProm"),baseOptions("prom"),o=>pickBase(o.b,"prom"),{delay:450});
+  combo($("#fNombre"),$("#popNombre"),baseOptions("nombre"),o=>pickBase(o.b,"nombre"),{delay:600});
+  combo($("#fCel"),$("#popCel"),baseOptions("cel"),o=>pickBase(o.b,"cel"),{delay:450});
+  combo($("#fDni"),$("#popDni"),baseOptions("dni"),o=>pickBase(o.b,"dni"),{delay:450});
+  // mientras se escribe (antes de la pausa) ya se ve que va a buscar
+  for(const [f,sel] of [["prom","#fProm"],["nombre","#fNombre"],["cel","#fCel"],["dni","#fDni"]])
+    $(sel).addEventListener("input",()=>{ const v=$(sel).value; if(busquedaApta(f,v)) setInd(f,"load","Buscando…"); else setInd(f,""); });
   $("#promHint").addEventListener("click",e=>{ const o=e.target.closest("[data-ci]"); if(o) pickBase(chooserItems[+o.dataset.ci], chooserTag); });
   const soloDigitos=(el,max)=>{ const v=digits(el.value).slice(0,max); if(el.value!==v) el.value=v; };
   $("#fCel").addEventListener("input",e=>{ soloDigitos(e.target,9); marcar(e.target,""); }, true);
@@ -766,7 +804,7 @@ function bindUI(){
   $("#fCel").addEventListener("input",()=>{ const c=digits($("#fCel").value); if(c.length===9 && !digits($("#fProm").value)) autoFillExact("cel",c); });
   const cCar=combo($("#fCarrera"),$("#popCarrera"),carreraOptions,o=>setCarrera(o.value));
   $("#fCarrera").addEventListener("change",()=>{ const c=carreraParecida($("#fCarrera").value); if(c) setCarrera(c); });
-  $("#fMundo").addEventListener("change",()=>{ const c=carreraExacta($("#fCarrera").value); if(c && CARRERAS[c]!==$("#fMundo").value && $("#fMundo").value) $("#fCarrera").value=""; $("#fCarrera").focus(); });
+  $("#fMundo").addEventListener("change",()=>{ const c=carreraExacta($("#fCarrera").value); if(c && c!==NO_DEF && CARRERAS[c]!==$("#fMundo").value && $("#fMundo").value) $("#fCarrera").value=""; $("#fCarrera").focus(); });
 
   // colegio
   $("#fDistrito").addEventListener("input",()=>{ selDist=null; });

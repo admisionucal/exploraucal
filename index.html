@@ -12,6 +12,10 @@
   --bg:#f3f5f9; --card:#ffffff; --line:#e3e7ef; --line-strong:#cfd6e3;
   --ink:#1c2433; --muted:#6b7385; --soft:#eef2fa;
   --blue:#0f47a8; --blue-ink:#0b3a8c; --blue-soft:#e7eefb;
+  --g-nv:#e8710a; --g-nv-soft:#fff1e3;     /* naranja: 3ero y 4to */
+  --g-q5:#0e9f9a; --g-q5-soft:#e2f6f5;     /* turquesa: 5to */
+  --g-eg:#c2187a; --g-eg-soft:#fce6f2;     /* fucsia: ya acabó */
+  --fam:#1f9d55; --fam-soft:#e5f6ec;       /* verde: familiares */
   --ok:#12805c; --ok-soft:#e3f5ed; --warn:#a15c00; --warn-soft:#fdf1df; --bad:#b42318; --bad-soft:#fde8e6;
   --font:"Figtree",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --r:10px;
@@ -87,6 +91,20 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--blue);outl
 .seg button{appearance:none;height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--line-strong);background:#fff;cursor:pointer;font-weight:500}
 .seg button[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:#fff}
 .seg button.nv[aria-pressed="true"]{background:var(--warn);border-color:var(--warn)}
+/* Colores de grado: 3ero/4to naranja · 5to turquesa · Ya acabó fucsia */
+#segGrado button[data-v="3ero"],#segGrado button[data-v="4to"]{border-color:var(--g-nv);color:var(--g-nv);background:var(--g-nv-soft)}
+#segGrado button[data-v="5to"]{border-color:var(--g-q5);color:var(--g-q5);background:var(--g-q5-soft)}
+#segGrado button[data-v="Ya acabo el colegio"]{border-color:var(--g-eg);color:var(--g-eg);background:var(--g-eg-soft)}
+#segGrado button[data-v="3ero"][aria-pressed="true"],#segGrado button[data-v="4to"][aria-pressed="true"]{background:var(--g-nv);border-color:var(--g-nv);color:#fff}
+#segGrado button[data-v="5to"][aria-pressed="true"]{background:var(--g-q5);border-color:var(--g-q5);color:#fff}
+#segGrado button[data-v="Ya acabo el colegio"][aria-pressed="true"]{background:var(--g-eg);border-color:var(--g-eg);color:#fff}
+#segGrado button{font-weight:600}
+/* Familiares en verde */
+#addAcomp .btn[data-t="Madre"],#addAcomp .btn[data-t="Padre"],#addAcomp .btn[data-t="Familiar"]{border-color:var(--fam);color:var(--fam);background:var(--fam-soft)}
+#addAcomp .btn[data-t="Madre"]:hover,#addAcomp .btn[data-t="Padre"]:hover,#addAcomp .btn[data-t="Familiar"]:hover{background:var(--fam);color:#fff}
+.pill.g-nv{background:var(--g-nv-soft);color:var(--g-nv)}
+.pill.g-q5{background:var(--g-q5-soft);color:var(--g-q5)}
+.pill.g-eg{background:var(--g-eg-soft);color:var(--g-eg)}
 .sect{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:2px 0 -4px}
 .acomp{display:flex;flex-direction:column;gap:8px}
 .arow{display:grid;grid-template-columns:120px minmax(0,1fr) 150px auto;gap:8px;align-items:center}
@@ -135,6 +153,25 @@ tr:last-child td{border-bottom:0}
 .errmsg{color:var(--bad);font-size:12px;font-weight:600}
 .errmsg:empty{display:none}
 input.inerr{border-color:var(--bad);background:var(--bad-soft)}
+/* Indicador de búsqueda junto a la etiqueta */
+.lblrow{display:flex;align-items:center;gap:6px;min-width:0}
+.ind{font-style:normal;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ind:empty::before{content:none}
+.ind::before{content:"";flex:none;width:12px;height:12px;border-radius:50%;box-sizing:border-box;display:inline-grid;place-items:center;font-size:9px;line-height:1}
+.ind.load{color:var(--blue)}
+.ind.load::before{border:2px solid var(--blue-soft);border-top-color:var(--blue);animation:girar .7s linear infinite}
+.ind.ok{color:var(--ok)}
+.ind.ok::before{content:"✓";background:var(--ok);color:#fff;font-weight:700}
+.ind.no{color:var(--muted)}
+.ind.no::before{content:"✕";background:var(--line-strong);color:#fff;font-weight:700}
+.ind.err{color:var(--bad)}
+.ind.err::before{content:"!";background:var(--bad);color:#fff;font-weight:700}
+@keyframes girar{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.ind.load::before{animation-duration:2s}}
+/* Resultados: dato buscado arriba, ID y número abajo */
+.opt.stack{flex-direction:column;align-items:flex-start;gap:2px}
+.opt.stack span{font-weight:600}
+.opt.stack small{white-space:normal}
 #regForm .grid{align-items:start}
 .pop{min-width:min(380px,calc(100vw - 32px))}
 .opt{align-items:baseline}
@@ -153,7 +190,7 @@ input.inerr{border-color:var(--bad);background:var(--bad-soft)}
 .corte tr.tot td{font-weight:700;background:var(--blue-soft);color:var(--blue-ink)}
 .corte td.rowtot{font-weight:700}
 .corte tr.sub td:first-child{padding-left:26px;color:var(--muted)}
-.lista td.wrap{white-space:normal;min-width:180px}
+.lista td.tw{white-space:normal;min-width:180px}
 
 .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;justify-content:space-between}
 .toolbar .left,.toolbar .right{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
@@ -282,14 +319,14 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
             </div>
 
             <div class="grid">
-              <div class="f combo"><label class="f"><span>ID Prometeo</span><input type="text" id="fProm" inputmode="numeric" placeholder="Escribe el ID"></label><div class="pop" id="popProm" hidden></div></div>
+              <div class="f combo"><label class="f"><span class="lblrow">ID Prometeo <i class="ind" id="indProm"></i></span><input type="text" id="fProm" inputmode="numeric" placeholder="Escribe el ID"></label><div class="pop" id="popProm" hidden></div></div>
               <label class="f s2"><span>Asesor</span><input type="text" id="fAsesor" list="asesorList" placeholder="Se completa con la base Prometeo"></label>
               <label class="f"><span>Subcanal 2</span><input type="text" id="fSubcanal" placeholder="De la base Prometeo"></label>
               <datalist id="asesorList"></datalist>
               <p class="hint s4 promhint" id="promHint"></p>
-              <div class="f s2 combo"><label class="f"><span>Nombres y apellidos *</span><input type="text" id="fNombre"></label><div class="pop" id="popNombre" hidden></div></div>
-              <div class="f s2 combo"><label class="f"><span>Documento (DNI o Carné de Extranjería)</span><input type="text" id="fDni" inputmode="numeric" maxlength="9" placeholder="8 o 9 dígitos"></label><div class="pop" id="popDni" hidden></div></div>
-              <div class="f combo"><label class="f"><span>Celular *</span><input type="tel" id="fCel" inputmode="numeric" maxlength="9" placeholder="9 dígitos"></label><div class="pop" id="popCel" hidden></div></div>
+              <div class="f s2 combo"><label class="f"><span class="lblrow">Nombres y apellidos * <i class="ind" id="indNombre"></i></span><input type="text" id="fNombre"></label><div class="pop" id="popNombre" hidden></div></div>
+              <div class="f s2 combo"><label class="f"><span class="lblrow">Documento (DNI o Carné de Extranjería) <i class="ind" id="indDni"></i></span><input type="text" id="fDni" inputmode="numeric" maxlength="9" placeholder="8 o 9 dígitos"></label><div class="pop" id="popDni" hidden></div></div>
+              <div class="f combo"><label class="f"><span class="lblrow">Celular * <i class="ind" id="indCel"></i></span><input type="tel" id="fCel" inputmode="numeric" maxlength="9" placeholder="9 dígitos"></label><div class="pop" id="popCel" hidden></div></div>
               <label class="f"><span>Mundo</span><select id="fMundo"></select></label>
               <div class="f s2 combo"><label class="f"><span>Carrera *</span><input type="text" id="fCarrera" placeholder="Escribe o elige la carrera"></label><div class="pop" id="popCarrera" hidden></div></div>
               <div class="f s3"><span class="lbl">¿En qué grado está? *</span>

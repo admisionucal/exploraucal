@@ -8,6 +8,7 @@
  *   - busca por ID PROMETEO, NOMBRES, NUMERO DE DOCUMENTO y en todas las columnas de teléfono
  *     (Telefono 1, Telefono 2 y las de padre/madre/familiar si existen);
  *   - devuelve ID, asesor (ASESOR ULT TIP DF SN CONTC) y SUBCANAL 2 (si existe);
+ *   - el asesor solo se entrega si STATUS DE GESTIÓN es VALORACION POSITIVA VIVA o PROMESA DE PAGO VIVA;
  *   - devuelve como máximo 8 coincidencias por búsqueda, nunca la hoja completa;
  *   - pide al menos 3 dígitos o 4 letras;
  *   - limita a 40 búsquedas por minuto por usuario.
@@ -32,10 +33,13 @@ const COLUMNAS = {
   nombre:  ['nombres', 'nombre', 'nombres y apellidos', 'nombre completo', 'alumno', 'prospecto', 'lead'],
   dni:     ['numero de documento', 'nro de documento', 'nro documento', 'documento', 'dni', 'numero documento'],
   asesor:  ['asesor ult tip df sn contc', 'asesor', 'asesora', 'asesor comercial', 'ejecutivo', 'ejecutiva', 'promotor', 'vendedor', 'responsable', 'asesor asignado'],
-  subcanal:['subcanal 2', 'subcanal2', 'sub canal 2']
+  subcanal:['subcanal 2', 'subcanal2', 'sub canal 2'],
+  status:  ['status de gestion', 'estado de gestion', 'status gestion', 'estatus de gestion']
 };
+// El asesor SOLO se entrega si STATUS DE GESTIÓN es uno de estos (se comparan sin tildes ni mayúsculas)
+const STATUS_CON_ASESOR = ['valoracion positiva viva', 'valoracion postiva viva', 'promesa de pago viva'];
 // Si no hay coincidencia exacta, se usa la primera columna que EMPIECE con esto
-const PREFIJOS = { asesor: 'asesor', subcanal: 'subcanal 2' };
+const PREFIJOS = { asesor: 'asesor', subcanal: 'subcanal 2', status: 'status de gestion' };
 // Teléfonos: TODAS las columnas cuyo nombre contenga telefono / celular / movil / whatsapp
 const RE_TELEFONO = /(telefono|celular|movil|whatsapp)/;
 const RE_FAMILIAR = /(padre|madre|apoderad|familiar|tutor|acompanante)/;
@@ -110,9 +114,14 @@ function dentroDelLimite_(email) {
 function hoja_() {
   return NOMBRE_HOJA ? SpreadsheetApp.getActive().getSheetByName(NOMBRE_HOJA) : SpreadsheetApp.getActive().getSheets()[0];
 }
-function columnas_(sh) {
-  const lastCol = sh.getLastColumn();
-  const txt = sh.getRange(1, 1, 1, lastCol).getDisplayValues()[0];
+function columnas_(sh, fresco) {
+  const cache = CacheService.getScriptCache();
+  let txt = !fresco && cache.get('cols') ? JSON.parse(cache.get('cols')) : null;   // encabezados en caché
+  if (!txt) {
+    txt = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+    cache.put('cols', JSON.stringify(txt), MINUTOS_INDICE * 60 * 3);
+  }
+  const lastCol = txt.length;
   const heads = txt.map(norm_);
   const col = {};
   Object.keys(COLUMNAS).forEach(k => {
@@ -124,21 +133,27 @@ function columnas_(sh) {
 }
 
 // ====== Índice en caché ======
-// Cada fila del índice: [fila, id, dni, "tel1,tel2,...", nombreNormalizado]
+// Cada fila del índice (separada por tabs):
+// 0 fila · 1 id · 2 dni · 3 teléfonos por columna (separados por |) · 4 nombre normalizado
+// 5 nombre · 6 asesor · 7 status · 8 subcanal
 function construirIndice_() {
   const sh = hoja_();
-  const c = columnas_(sh);
+  const c = columnas_(sh, true);   // al renovar el índice se releen los encabezados
   if (!c.col.id) throw new Error('No se encontró la columna ID PROMETEO');
   const lastRow = sh.getLastRow(), n = Math.max(0, lastRow - 1);
   const leer = k => k && n ? sh.getRange(2, k, n, 1).getDisplayValues() : null;
   const ids = leer(c.col.id), noms = leer(c.col.nombre), docs = leer(c.col.dni);
+  const ases = leer(c.col.asesor), sts = leer(c.col.status), subs = leer(c.col.subcanal);
   const tels = c.tel.map(leer);
+  const limpio = v => String(v == null ? '' : v).replace(/[\t\n\r|]+/g, ' ').trim();
   const filas = [];
   for (let i = 0; i < n; i++) {
     const id = String(ids[i][0]).replace(/\D/g, '');
     if (!id) continue;
-    const t = tels.map(arr => String(arr[i][0]).replace(/\D/g, '')).filter(Boolean).join(',');
-    filas.push([i + 2, id, docs ? String(docs[i][0]).replace(/\D/g, '') : '', t, noms ? norm_(noms[i][0]) : '']);
+    const t = tels.map(arr => String(arr[i][0]).replace(/\D/g, '')).join('|');
+    const nom = noms ? limpio(noms[i][0]) : '';
+    filas.push([i + 2, id, docs ? String(docs[i][0]).replace(/\D/g, '') : '', t, norm_(nom), nom,
+      ases ? limpio(ases[i][0]) : '', sts ? limpio(sts[i][0]) : '', subs ? limpio(subs[i][0]) : '']);
   }
   return { filas, creado: Date.now(), tel: c.tel, col: c.col };
 }
@@ -203,12 +218,12 @@ function buscar_(field, q, qd) {
   const MAXF = 4000;
   if (field === 'prom' || field === 'dni') {
     const k = field === 'prom' ? 1 : 2;
-    filasCon_(T, '\t' + qd + '\t', 50, f => { if (f[k] === qd) scored.push({ r: +f[0], s: 1 }); });           // exacto primero
-    filasCon_(T, qd, MAXF, f => { if (f[k] && f[k] !== qd && f[k].indexOf(qd) >= 0) scored.push({ r: +f[0], s: 0.9 }); });
+    filasCon_(T, '\t' + qd + '\t', 50, f => { if (f[k] === qd) scored.push({ r: +f[0], s: 1, f }); });           // exacto primero
+    filasCon_(T, qd, MAXF, f => { if (f[k] && f[k] !== qd && f[k].indexOf(qd) >= 0) scored.push({ r: +f[0], s: 0.9, f }); });
   } else if (field === 'cel') {
-    filasCon_(T, qd, MAXF, f => { if (f[3] && f[3].indexOf(qd) >= 0) scored.push({ r: +f[0], s: 1 }); });
+    filasCon_(T, qd, MAXF, f => { if (f[3] && f[3].indexOf(qd) >= 0) scored.push({ r: +f[0], s: 1, f }); });
     if (!scored.length && qd.length >= 7) {                                                        // aproximado: mismo inicio
-      filasCon_(T, qd.slice(0, 4), 20000, f => { if (!f[3]) return; let best = 0; f[3].split(',').forEach(t => { const s = numScore_(qd, t); if (s > best) best = s; }); if (best >= 0.8) scored.push({ r: +f[0], s: best }); });
+      filasCon_(T, qd.slice(0, 4), 20000, f => { if (!f[3]) return; let best = 0; f[3].split('|').forEach(t => { const s = numScore_(qd, t); if (s > best) best = s; }); if (best >= 0.8) scored.push({ r: +f[0], s: best, f }); });
     }
   } else {
     const qn = norm_(q), palabras = qn.split(' ').filter(w => w.length >= 3);
@@ -216,7 +231,7 @@ function buscar_(field, q, qd) {
     palabras.slice(0, 3).forEach(w => {
       filasCon_(T, w.slice(0, 3), 30000, f => {
         if (vistos[f[0]] || !f[4]) return; vistos[f[0]] = 1;
-        const s = textScore_(qn, f[4]); if (s >= 0.7) scored.push({ r: +f[0], s });
+        const s = textScore_(qn, f[4]); if (s >= 0.7) scored.push({ r: +f[0], s, f });
       });
     });
   }
@@ -239,18 +254,29 @@ function buscar_(field, q, qd) {
   const vistos = {}; scored = scored.filter(o => vistos[o.r] ? false : (vistos[o.r] = true)).slice(0, MAX_RESULTADOS);
 
   return scored.map(o => {
-    const row = sh.getRange(o.r, 1, 1, c.lastCol).getDisplayValues()[0];
-    const g = k => k ? String(row[k - 1]).trim() : '';
-    const propias = c.tel.filter(k => !RE_FAMILIAR.test(c.heads[k - 1])).map(k => g(k).replace(/\D/g, '').slice(-9)).filter(Boolean);
+    let d;
+    if (o.f && o.f.length >= 9) {
+      d = { id: o.f[1], nombre: o.f[5], dni: o.f[2], tels: o.f[3].split('|'), asesor: o.f[6], status: o.f[7], subcanal: o.f[8] };
+    } else {   // fila nueva encontrada directo en la hoja
+      const row = sh.getRange(o.r, 1, 1, c.lastCol).getDisplayValues()[0];
+      const g = k => k ? String(row[k - 1]).trim() : '';
+      d = { id: g(c.col.id).replace(/\D/g, ''), nombre: g(c.col.nombre), dni: g(c.col.dni).replace(/\D/g, ''),
+            tels: c.tel.map(k => g(k).replace(/\D/g, '')), asesor: g(c.col.asesor), status: g(c.col.status), subcanal: g(c.col.subcanal) };
+    }
+    // d.tels va alineado con c.tel (mismas columnas de teléfono)
+    const propias = c.tel.map((k, i) => RE_FAMILIAR.test(c.heads[k - 1]) ? '' : (d.tels[i] || '').slice(-9)).filter(Boolean);
     let via = '', viaFamiliar = false;
     if (field === 'cel') {
-      const k = c.tel.find(k => g(k).replace(/\D/g, '').indexOf(qd) >= 0) || c.tel.find(k => numScore_(qd, g(k)) >= 0.8);
-      if (k) { via = c.txt[k - 1]; viaFamiliar = RE_FAMILIAR.test(c.heads[k - 1]); }
+      let i = d.tels.findIndex(t => t && t.indexOf(qd) >= 0);
+      if (i < 0) i = d.tels.findIndex(t => t && numScore_(qd, t) >= 0.8);
+      if (i >= 0 && c.tel[i]) { via = c.txt[c.tel[i] - 1]; viaFamiliar = RE_FAMILIAR.test(c.heads[c.tel[i] - 1]); }
     }
     const tel = (field === 'cel' && !viaFamiliar && propias.find(t => t.indexOf(qd) >= 0)) || propias.find(t => /^9\d{8}$/.test(t)) || propias[0] || '';
     return {
-      id: g(c.col.id).replace(/\D/g, ''), nombre: g(c.col.nombre), celular: tel, dni: g(c.col.dni).replace(/\D/g, ''),
-      asesor: g(c.col.asesor), subcanal: g(c.col.subcanal),
+      id: d.id, nombre: d.nombre, celular: tel, dni: d.dni,
+      // asesor solo con STATUS DE GESTIÓN = VALORACION POSITIVA VIVA o PROMESA DE PAGO VIVA
+      asesor: STATUS_CON_ASESOR.indexOf(norm_(d.status)) >= 0 ? d.asesor : '',
+      status: d.status, subcanal: d.subcanal,
       via: via, viaFamiliar: viaFamiliar,
       s: Math.round(o.s * 100) / 100
     };
@@ -261,14 +287,14 @@ function buscar_(field, q, qd) {
 function diagnostico_() {
   const t0 = Date.now();
   const sh = hoja_();
-  const c = columnas_(sh);
+  const c = columnas_(sh, true);
   const nom = k => c.col[k] ? c.txt[c.col[k] - 1] : '(no encontrada)';
   const meta = CacheService.getScriptCache().get('idx_meta');
   const m = meta ? JSON.parse(meta) : null;
   return {
     pestaña: sh.getName(), filas: sh.getLastRow() - 1, columnas: c.lastCol,
     encabezados: c.txt.filter(Boolean),
-    detectadas: { id: nom('id'), nombre: nom('nombre'), documento: nom('dni'), asesor: nom('asesor'), subcanal: nom('subcanal'), telefonos: c.tel.map(k => c.txt[k - 1]) },
+    detectadas: { id: nom('id'), nombre: nom('nombre'), documento: nom('dni'), asesor: nom('asesor'), status: nom('status'), subcanal: nom('subcanal'), telefonos: c.tel.map(k => c.txt[k - 1]) },
     indice: m ? { filas: m.filas, partes: m.partes, minutos: Math.round((Date.now() - m.creado) / 60000) } : 'sin índice (ejecuta "instalar")',
     errorIndice: PropertiesService.getScriptProperties().getProperty('idx_error') || '',
     triggers: ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction()),

@@ -53,7 +53,7 @@ La clave *anon* es pública por diseño; la seguridad la dan el login y las pol�
 1. Ingresa con tu correo UCAL. El **registrador** es siempre el usuario con el que entraste.
 2. **Registro**: busca al inscrito por nombre (no tiene que estar escrito igual: se muestra el % de parecido) o por celular, DNI o ID Prometeo. Haz clic en él, revisa o corrige sus datos y presiona **Registrar llegada**.
    Si no está inscrito, llena el formulario como nuevo asistente.
-3. **Mundo y carrera**: elige el mundo y luego la carrera (la lista se filtra), o escribe la carrera directamente y el mundo se completa solo.
+3. **Mundo y carrera**: elige el mundo y luego la carrera (la lista se filtra), o escribe la carrera directamente y el mundo se completa solo. Si tiene más de una carrera o ninguna, elige **No definido**: se mantiene el mundo elegido o, si no hay, va a la columna NO DEFINIDO del corte.
 4. **Colegio**: escribe el código modular y se completan el nombre y el distrito; o elige el distrito y busca el colegio por nombre.
 5. El **corte en vivo** se actualiza solo en todas las computadoras conectadas (punto verde junto a tu nombre).
 6. **Asistentes**: filtra *Llegaron / Inscritos sin llegar / Todos*, corrige, quita la llegada o elimina.
@@ -72,8 +72,8 @@ La página consulta tu hoja de Google Sheets cada vez que alguien escribe un ID,
 1. Abre la hoja → **Extensiones → Apps Script**.
 2. Borra lo que haya y pega el contenido de `google-apps-script/Codigo.gs`.
 3. Arriba del archivo completa `SUPABASE_URL` y `SUPABASE_ANON_KEY` (los mismos de `config.js`). Si la base no está en la primera pestaña, escribe su nombre en `NOMBRE_HOJA`.
-4. La primera fila de la hoja debe tener los encabezados. Se reconocen: *ID PROMETEO*, *NOMBRES*, *TELEFONO 1* y *TELEFONO 2* (se busca en ambos), *NUMERO DE DOCUMENTO*, *ASESOR ULT TIP DF SN CONTC* (asesor) y *SUBCANAL 2* (opcional). El teléfono se busca en todas las columnas que contengan *Telefono* o *Celular*, incluidas las de padre, madre o familiar; al escribir el celular de un acompañante también se busca.
-5. Guarda (💾). En la lista de funciones elige **probar** y presiona **Ejecutar** → **Revisar permisos** → elige tu cuenta → **Permitir**.
+4. La primera fila de la hoja debe tener los encabezados. Se reconocen: *ID PROMETEO*, *NOMBRES*, *TELEFONO 1* y *TELEFONO 2* (se busca en ambos), *NUMERO DE DOCUMENTO*, *ASESOR ULT TIP DF SN CONTC* (asesor), *STATUS DE GESTIÓN* y *SUBCANAL 2* (opcional). El asesor solo se completa si STATUS DE GESTIÓN es VALORACION POSITIVA VIVA o PROMESA DE PAGO VIVA; con otro estado se completan los demás datos y la página muestra el estado. El teléfono se busca en todas las columnas que contengan *Telefono* o *Celular*, incluidas las de padre, madre o familiar; al escribir el celular de un acompañante también se busca.
+5. Guarda (💾). En la lista de funciones elige **instalar** y presiona **Ejecutar** → **Revisar permisos** → elige tu cuenta → **Permitir**. Esto crea el índice de búsqueda y lo renueva cada 10 minutos.
 6. **Implementar → Nueva implementación** → tipo **Aplicación web**:
    - *Ejecutar como*: **Yo**
    - *Quién tiene acceso*: **Cualquier usuario** (la seguridad la pone el login de la página, no Google).
