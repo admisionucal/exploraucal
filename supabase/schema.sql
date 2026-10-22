@@ -88,6 +88,20 @@ alter table public.colegios enable row level security;
 drop policy if exists "ucal colegios" on public.colegios;
 create policy "ucal colegios"  on public.colegios  for all to authenticated using (public.es_ucal()) with check (public.es_ucal());
 
+-- 2b) Registro desde la página: solo se pueden crear cuentas @ucal.edu.pe
+create or replace function public.solo_correos_ucal() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.email is null or lower(new.email) not like '%@ucal.edu.pe' then
+    raise exception 'Solo correos @ucal.edu.pe';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists solo_correos_ucal on auth.users;
+create trigger solo_correos_ucal before insert or update of email on auth.users
+  for each row execute function public.solo_correos_ucal();
+
 -- 3) Tiempo real (el corte se actualiza en todas las pantallas) --
 
 do $$

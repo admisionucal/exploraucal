@@ -218,6 +218,8 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
 .login-card form{display:flex;flex-direction:column;gap:12px}
 .login-card .btn{justify-content:center}
 .msg{color:var(--bad);font-size:13px;min-height:1em;margin:0}
+.msg.okmsg{color:var(--ok)}
+.loginlinks{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .userchip{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--line-strong);display:inline-block}
 .dot[data-on="1"]{background:var(--ok)}
@@ -256,14 +258,47 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
 <body>
 <main class="login" id="login" hidden>
   <div class="login-card">
-    <div class="brand"><small>Admisión UCAL · Pregrado</small><h1>Registro de asistentes</h1></div>
+    <div class="brand"><small>Admisión UCAL · Pregrado</small><h1 id="loginTitle">Registro de asistentes</h1></div>
+
+    <!-- Ingresar -->
     <form id="loginForm">
       <label class="f"><span>Correo UCAL</span><input type="text" id="lEmail" inputmode="email" autocomplete="username" placeholder="nombre@ucal.edu.pe" required></label>
       <label class="f"><span>Contraseña</span><input type="password" id="lPass" autocomplete="current-password"></label>
       <button class="btn primary big" id="btnLogin" type="submit">Ingresar</button>
-      <button class="btn ghost" id="btnMagic" type="button">Enviarme un enlace de acceso al correo</button>
+      <div class="loginlinks">
+        <button class="btn ghost sm" type="button" data-modo="signup">Crear mi acceso</button>
+        <button class="btn ghost sm" type="button" data-modo="reset">¿Olvidaste tu contraseña?</button>
+      </div>
     </form>
+
+    <!-- Crear acceso -->
+    <form id="signupForm" hidden>
+      <p class="hint" style="margin:0">Solo para correos @ucal.edu.pe. Te llegará un correo para confirmar que es tuyo.</p>
+      <label class="f"><span>Correo UCAL</span><input type="text" id="sEmail" inputmode="email" autocomplete="username" placeholder="nombre@ucal.edu.pe"></label>
+      <label class="f"><span>Crea una contraseña</span><input type="password" id="sPass" autocomplete="new-password" placeholder="Mínimo 8 caracteres"></label>
+      <label class="f"><span>Repite la contraseña</span><input type="password" id="sPass2" autocomplete="new-password"></label>
+      <button class="btn primary big" id="btnSignup" type="submit">Crear mi acceso</button>
+      <button class="btn ghost sm" type="button" data-modo="login">Ya tengo acceso: ingresar</button>
+    </form>
+
+    <!-- Olvidé mi contraseña -->
+    <form id="resetForm" hidden>
+      <p class="hint" style="margin:0">Te enviaremos un enlace para crear una contraseña nueva.</p>
+      <label class="f"><span>Correo UCAL</span><input type="text" id="rEmail" inputmode="email" autocomplete="username" placeholder="nombre@ucal.edu.pe"></label>
+      <button class="btn primary big" id="btnReset" type="submit">Enviarme el enlace</button>
+      <button class="btn ghost sm" type="button" data-modo="login">Volver a ingresar</button>
+    </form>
+
+    <!-- Nueva contraseña (al volver del enlace) -->
+    <form id="newPassForm" hidden>
+      <p class="hint" style="margin:0">Escribe tu nueva contraseña.</p>
+      <label class="f"><span>Nueva contraseña</span><input type="password" id="nPass" autocomplete="new-password" placeholder="Mínimo 8 caracteres"></label>
+      <label class="f"><span>Repite la contraseña</span><input type="password" id="nPass2" autocomplete="new-password"></label>
+      <button class="btn primary big" id="btnNewPass" type="submit">Guardar contraseña</button>
+    </form>
+
     <p class="msg" id="loginMsg"></p>
+    <button class="btn ghost sm" id="btnResend" type="button" hidden>Reenviar correo de confirmación</button>
   </div>
 </main>
 

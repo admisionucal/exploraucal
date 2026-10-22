@@ -17,9 +17,11 @@ supabase/schema.sql → tablas y permisos (se pega una sola vez en Supabase)
 
 1. Entra a <https://supabase.com>, crea una cuenta y un **New project**. Región sugerida: *South America (São Paulo)*. Guarda la contraseña de la base.
 2. En el menú izquierdo abre **SQL Editor → New query**, pega todo el contenido de `supabase/schema.sql` y presiona **Run**. Debe decir *Success*.
-3. **Authentication → Sign In / Providers → Email**: deja Email activado y **desactiva "Allow new users to sign up"**. Así solo entran las personas que tú agregues.
-4. **Authentication → Users → Add user → Create new user**: crea a cada registrador con su correo `@ucal.edu.pe` y una contraseña (marca *Auto Confirm User*).
-   - Aunque alguien cree un usuario con otro dominio, la base no le muestra ni le deja guardar nada: las políticas solo aceptan correos `@ucal.edu.pe`.
+3. **Authentication → Sign In / Providers → Email**: deja Email activado, **activa "Allow new users to sign up"** y **"Confirm email"**. Así cada persona crea su acceso desde la página (botón *Crear mi acceso*) y debe confirmarlo desde su correo. Solo se aceptan correos `@ucal.edu.pe` (lo impide la base aunque se intente por fuera de la página).
+4. **Envío de correos (obligatorio para el registro)**: el correo que trae Supabase solo envía a los miembros del equipo de Supabase y 2 por hora. Configura uno propio en **Authentication → Emails → SMTP Settings → Enable custom SMTP**:
+   - **Con Gmail de UCAL** (si tu cuenta tiene verificación en 2 pasos): crea una *contraseña de aplicación* en https://myaccount.google.com/apppasswords y usa: Host `smtp.gmail.com`, Port `465`, Username = tu correo completo, Password = la contraseña de aplicación (16 letras), Sender email = el mismo correo, Sender name `Admisión UCAL`.
+   - **Si UCAL no permite contraseñas de aplicación**: crea una cuenta gratis en Brevo (300 correos/día), verifica tu correo como remitente y usa los datos SMTP que te da (Host `smtp-relay.brevo.com`, Port `587`).
+   - Luego, en **Authentication → Rate Limits**, sube "emails per hour" (por ejemplo a 30).
 5. **Project Settings → API**: copia **Project URL** y la clave **anon public**.
 
 ## 2. Configurar la página
@@ -40,7 +42,7 @@ La clave *anon* es pública por diseño; la seguridad la dan el login y las pol�
 2. Sube `index.html`, `app.js`, `config.js` y la carpeta `supabase` (botón **Add file → Upload files**).
 3. **Settings → Pages → Build and deployment**: *Source: Deploy from a branch*, rama `main`, carpeta `/ (root)` → **Save**.
 4. En 1–2 minutos la página queda en `https://TU-USUARIO.github.io/registro-explora/`.
-5. Vuelve a Supabase → **Authentication → URL Configuration** y pon esa dirección en **Site URL** (sirve para el botón "Enviarme un enlace de acceso").
+5. Vuelve a Supabase → **Authentication → URL Configuration**: pon esa dirección en **Site URL** y también agrégala en **Redirect URLs**. Así los enlaces de confirmación y de "¿Olvidaste tu contraseña?" abren tu página.
 
 ## 4. Antes del evento (pestaña Importar)
 

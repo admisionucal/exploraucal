@@ -96,7 +96,7 @@ function numScore(qd, val){
 }
 
 /* ================= Estado ================= */
-let sb=null, session=null, me="", channel=null;
+let sb=null, session=null, me="", channel=null, recuperando=false;
 let eventos=[], eid=null, regs=[];
 let colegios=[], colByCod=new Map(), distritos=[], colLoaded=false, selDist=null;
 let editingId=null, grado=null, acomp=[];
@@ -874,22 +874,93 @@ function bindUI(){
     drop.querySelector("input[type=file]").addEventListener("change",e=>{ const f=e.target.files[0]; if(f) run(f); e.target.value=""; });
   });
 
-  // login
+  // ---- Acceso: ingresar · crear acceso · olvidé contraseña · nueva contraseña ----
+  const urlVuelta=()=>location.href.split("#")[0].split("?")[0];
+  const okDominio=e=>e.endsWith("@"+CFG.DOMINIO) && e.length>CFG.DOMINIO.length+1;
+  const msg=(t,ok)=>{ const m=$("#loginMsg"); m.textContent=t||""; m.classList.toggle("okmsg",!!ok); };
+  let correoPendiente="";
+  function modo(m){
+    ["loginForm","signupForm","resetForm","newPassForm"].forEach(id=>$("#"+id).hidden = id!==m+"Form");
+    $("#loginTitle").textContent={login:"Registro de asistentes",signup:"Crear mi acceso",reset:"Recuperar contraseña",newPass:"Nueva contraseña"}[m];
+    $("#btnResend").hidden=true; msg("");
+    const e=$("#lEmail").value.trim(); if(e){ $("#sEmail").value=$("#sEmail").value||e; $("#rEmail").value=$("#rEmail").value||e; }
+  }
+  window.__modoLogin=modo;
+  document.querySelectorAll("[data-modo]").forEach(b=>b.addEventListener("click",()=>modo(b.dataset.modo)));
+
   $("#loginForm").addEventListener("submit",async e=>{
-    e.preventDefault(); $("#loginMsg").textContent="";
+    e.preventDefault(); msg("");
     const email=$("#lEmail").value.trim().toLowerCase(), password=$("#lPass").value;
-    if(!email.endsWith("@"+CFG.DOMINIO)){ $("#loginMsg").textContent=`Usa tu correo @${CFG.DOMINIO}.`; return; }
+    if(!okDominio(email)){ msg(`Usa tu correo @${CFG.DOMINIO}.`); return; }
     $("#btnLogin").disabled=true;
     const {error}=await sb.auth.signInWithPassword({email,password});
     $("#btnLogin").disabled=false;
-    if(error) $("#loginMsg").textContent = /Invalid login/i.test(error.message) ? "Correo o contraseña incorrectos." : error.message;
+    if(!error) return;
+    if(/not confirmed/i.test(error.message)){ correoPendiente=email; msg("Aún no confirmas tu correo. Abre el enlace que te enviamos (revisa también Spam)."); $("#btnResend").hidden=false; }
+    else if(/Invalid login/i.test(error.message)) msg("Correo o contraseña incorrectos. Si aún no tienes acceso, usa «Crear mi acceso».");
+    else msg(error.message);
   });
-  $("#btnMagic").addEventListener("click",async()=>{
-    const email=$("#lEmail").value.trim().toLowerCase();
-    if(!email.endsWith("@"+CFG.DOMINIO)){ $("#loginMsg").textContent=`Escribe tu correo @${CFG.DOMINIO} y vuelve a presionar.`; return; }
-    const {error}=await sb.auth.signInWithOtp({email,options:{shouldCreateUser:false,emailRedirectTo:location.href.split("#")[0]}});
-    $("#loginMsg").textContent = error ? (/not found|signups not allowed/i.test(error.message)?"Ese correo no tiene acceso. Pide al administrador que te agregue.":error.message) : "Te enviamos un enlace de acceso. Revisa tu correo.";
+
+  $("#signupForm").addEventListener("submit",async e=>{
+    e.preventDefault(); msg("");
+    const email=$("#sEmail").value.trim().toLowerCase(), p1=$("#sPass").value, p2=$("#sPass2").value;
+    if(!okDominio(email)){ msg(`Solo se pueden crear accesos con correo @${CFG.DOMINIO}.`); return; }
+    if(p1.length<8){ msg("La contraseña debe tener al menos 8 caracteres."); return; }
+    if(p1.toLowerCase()===email.split("@")[0]){ msg("Elige una contraseña distinta a tu usuario de correo."); return; }
+    if(p1!==p2){ msg("Las contraseñas no coinciden."); return; }
+    $("#btnSignup").disabled=true;
+    const {data,error}=await sb.auth.signUp({email,password:p1,options:{emailRedirectTo:urlVuelta()}});
+    $("#btnSignup").disabled=false;
+    if(error){
+      if(/not allowed|disabled/i.test(error.message)) msg("El registro está desactivado. Pide al administrador que active «Allow new users to sign up» en Supabase.");
+      else if(/not authorized|sending|smtp/i.test(error.message)) msg("No se pudo enviar el correo de confirmación. El administrador debe configurar el envío de correos en Supabase (README, sección 1).");
+      else if(/rate limit/i.test(error.message)) msg("Se enviaron demasiados correos en poco tiempo. Intenta en unos minutos.");
+      else if(/solo correos|ucal/i.test(error.message)) msg(`Solo se pueden crear accesos con correo @${CFG.DOMINIO}.`);
+      else if(/weak|password/i.test(error.message)) msg("Esa contraseña es muy débil. Usa una más larga o con números.");
+      else msg(error.message);
+      return;
+    }
+    // Supabase no revela si el correo ya existía: en ese caso devuelve un usuario sin identidades
+    if(data?.user && Array.isArray(data.user.identities) && data.user.identities.length===0){
+      msg("Ese correo ya tiene acceso. Ingresa con tu contraseña o usa «¿Olvidaste tu contraseña?»."); return;
+    }
+    if(data?.session) return;   // confirmación desactivada: entra directo
+    correoPendiente=email;
+    modo("login"); $("#lEmail").value=email;
+    msg(`Listo. Te enviamos un correo a ${email}. Ábrelo y presiona el enlace para activar tu acceso (revisa también Spam).`, true);
+    $("#btnResend").hidden=false;
   });
+
+  $("#btnResend").addEventListener("click",async()=>{
+    const email=correoPendiente || $("#lEmail").value.trim().toLowerCase();
+    if(!okDominio(email)) return;
+    const {error}=await sb.auth.resend({type:"signup",email,options:{emailRedirectTo:urlVuelta()}});
+    msg(error ? (/rate limit/i.test(error.message)?"Espera unos minutos antes de pedir otro correo.":error.message) : `Te reenviamos el correo a ${email}.`, !error);
+  });
+
+  $("#resetForm").addEventListener("submit",async e=>{
+    e.preventDefault(); msg("");
+    const email=$("#rEmail").value.trim().toLowerCase();
+    if(!okDominio(email)){ msg(`Usa tu correo @${CFG.DOMINIO}.`); return; }
+    $("#btnReset").disabled=true;
+    const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:urlVuelta()});
+    $("#btnReset").disabled=false;
+    msg(error ? (/rate limit/i.test(error.message)?"Espera unos minutos antes de pedir otro correo.":error.message) : `Si ${email} tiene acceso, te llegará un enlace para crear una contraseña nueva.`, !error);
+  });
+
+  $("#newPassForm").addEventListener("submit",async e=>{
+    e.preventDefault(); msg("");
+    const p1=$("#nPass").value, p2=$("#nPass2").value;
+    if(p1.length<8){ msg("La contraseña debe tener al menos 8 caracteres."); return; }
+    if(p1!==p2){ msg("Las contraseñas no coinciden."); return; }
+    $("#btnNewPass").disabled=true;
+    const {error}=await sb.auth.updateUser({password:p1});
+    $("#btnNewPass").disabled=false;
+    if(error){ msg(error.message); return; }
+    recuperando=false; msg("Contraseña guardada.", true);
+    const {data:{session:s}}=await sb.auth.getSession(); onSession(s);
+  });
+
   $("#btnLogout").addEventListener("click",()=>sb.auth.signOut());
 
   setInterval(()=>{ renderLive(); if(!corteHora && !$("#v-corte").hidden) renderCorte(); }, 30000);
@@ -915,7 +986,11 @@ function boot(){
   }
   sb=window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
   let last; // la primera notificación (con o sin sesión) siempre se procesa
-  sb.auth.onAuthStateChange((evt,s)=>{ const id=s?.user?.id||null; if(id===last && evt!=="SIGNED_OUT") return; last=id; setTimeout(()=>onSession(s),0); });
+  sb.auth.onAuthStateChange((evt,s)=>{
+    if(evt==="PASSWORD_RECOVERY"){ recuperando=true; setTimeout(()=>{ $("#login").hidden=false; $("#app").hidden=true; window.__modoLogin("newPass"); },0); return; }
+    if(recuperando) return;   // primero debe guardar la contraseña nueva
+    const id=s?.user?.id||null; if(id===last && evt!=="SIGNED_OUT") return; last=id; setTimeout(()=>onSession(s),0);
+  });
 }
 boot();
 })();
