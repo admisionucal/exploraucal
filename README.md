@@ -4,6 +4,7 @@ Página para registrar la llegada de alumnos y acompañantes en eventos Explora 
 La página vive en **GitHub Pages** y los datos en **Supabase** (plan gratuito).
 
 ```
+google-apps-script/Codigo.gs → script para la hoja de la base Prometeo
 index.html        → la página
 app.js            → la lógica (búsqueda, registro, corte, importar y descargar Excel)
 config.js         → aquí van la URL y la clave de tu proyecto Supabase
@@ -57,6 +58,29 @@ La clave *anon* es pública por diseño; la seguridad la dan el login y las pol�
 5. El **corte en vivo** se actualiza solo en todas las computadoras conectadas (punto verde junto a tu nombre).
 6. **Asistentes**: filtra *Llegaron / Inscritos sin llegar / Todos*, corrige, quita la llegada o elimina.
 7. **Corte**: elige la hora (ej. 12:00) o *Hasta ahora* → verás la tabla por mundo y la tabla por carrera → **Copiar para WhatsApp** o **Descargar Excel** (hojas *Corte* —con ambas tablas— y *Registros*, con las columnas de la plantilla Explora + distrito y hora de llegada).
+
+## 6. Búsqueda en la base Prometeo (Google Sheets, en vivo)
+
+La página consulta tu hoja de Google Sheets cada vez que alguien escribe un ID, un nombre o un celular, y completa **ID Prometeo** y **Asesor**. La hoja no se importa ni se publica.
+
+**Seguridad**
+- La hoja sigue privada (no la compartas ni la publiques).
+- El script solo responde a quien tiene sesión iniciada en la página con correo @ucal.edu.pe (lo verifica con Supabase en cada consulta).
+- Devuelve como máximo 8 coincidencias por búsqueda, pide al menos 3 dígitos o 4 letras y permite 40 búsquedas por minuto por usuario: no se puede descargar la base completa.
+
+**Instalación (una vez, 5 min)**
+1. Abre la hoja → **Extensiones → Apps Script**.
+2. Borra lo que haya y pega el contenido de `google-apps-script/Codigo.gs`.
+3. Arriba del archivo completa `SUPABASE_URL` y `SUPABASE_ANON_KEY` (los mismos de `config.js`). Si la base no está en la primera pestaña, escribe su nombre en `NOMBRE_HOJA`.
+4. La primera fila de la hoja debe tener los encabezados. Se reconocen: *ID PROMETEO*, *NOMBRES*, *TELEFONO 1* y *TELEFONO 2* (se busca en ambos), *NUMERO DE DOCUMENTO*, *ASESOR ULT TIP DF SN CONTC* (asesor) y *SUBCANAL 2* (opcional). El teléfono se busca en todas las columnas que contengan *Telefono* o *Celular*, incluidas las de padre, madre o familiar; al escribir el celular de un acompañante también se busca.
+5. Guarda (💾). En la lista de funciones elige **probar** y presiona **Ejecutar** → **Revisar permisos** → elige tu cuenta → **Permitir**.
+6. **Implementar → Nueva implementación** → tipo **Aplicación web**:
+   - *Ejecutar como*: **Yo**
+   - *Quién tiene acceso*: **Cualquier usuario** (la seguridad la pone el login de la página, no Google).
+7. Presiona **Implementar** y copia la **URL de la aplicación web** (termina en `/exec`).
+8. Pégala en `config.js`, en `PROMETEO_URL`, y sube los cambios a GitHub.
+
+Si cambias el script después, usa **Implementar → Gestionar implementaciones → Editar (lápiz) → Versión: Nueva versión** para que la URL siga siendo la misma.
 
 ### Cómo se calcula el corte
 - **Padres**: acompañantes marcados como Madre, Padre o Familiar.

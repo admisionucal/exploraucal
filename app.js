@@ -28,8 +28,10 @@ const GRADOS = ["3ero","4to","5to","Ya acabo el colegio"];
 const COLS_INSCRITOS = [
   {f:"nombre", label:"Nombres y Apellidos", req:true, alias:["nombres y apellidos","nombre y apellido","nombre completo","nombres","nombre","alumno","estudiante"]},
   {f:"celular", label:"Celular", alias:["celular","telefono","movil","whatsapp","numero"]},
-  {f:"dni", label:"DNI", alias:["dni","documento","nro documento","numero de documento"]},
+  {f:"dni", label:"Documento (DNI o CE)", alias:["dni","documento","nro documento","numero de documento","documento dni o ce","documento dni ce","carne de extranjeria","ce"]},
   {f:"id_prometeo", label:"ID Prometeo", alias:["id prometeo","prometeo"]},
+  {f:"asesor", label:"Asesor", alias:["asesor","asesora","asesor comercial","ejecutivo","promotor","asesor ult tip df sn contc"]},
+  {f:"subcanal", label:"Subcanal 2", alias:["subcanal 2","subcanal2","subcanal"]},
   {f:"carrera", label:"Carrera", alias:["carrera","carrera de interes"]},
   {f:"mundo", label:"Mundo", alias:["mundo"]},
   {f:"grado", label:"¿En qué grado está?", alias:["en que grado esta","grado"]},
@@ -96,6 +98,7 @@ let eventos=[], eid=null, regs=[];
 let colegios=[], colByCod=new Map(), distritos=[], colLoaded=false, selDist=null;
 let editingId=null, grado=null, acomp=[];
 let corteHora="", filtro="asis";
+const promCache=new Map(); let promSeq=0;
 
 function toast(msg, kind=""){
   const t=$("#toast"); t.textContent=msg; t.className="toast "+kind; t.hidden=false;
@@ -115,15 +118,18 @@ function dbError(e){
   const m=String(e?.message||"");
   if(/row-level security|permission|JWT/i.test(m)) toast("Sin permiso: inicia sesión con tu correo @"+(CFG.DOMINIO||"ucal.edu.pe"),"bad");
   else if(/Failed to fetch|NetworkError/i.test(m)) toast("Sin conexión. Revisa el internet e intenta de nuevo.","bad");
-  else if(/distrito|colegios/i.test(m) && /column|relation|does not exist/i.test(m)) toast("Falta actualizar la base: vuelve a correr schema.sql en Supabase.","bad");
+  else if(/distrito|colegios|asesor|subcanal/i.test(m) && /column|relation|does not exist/i.test(m)) toast("Falta actualizar la base: vuelve a correr schema.sql en Supabase.","bad");
   else toast("No se pudo guardar: "+m,"bad");
 }
 
 /* ================= Combos (lista desplegable con búsqueda) ================= */
 function combo(input, pop, getOptions, onPick){
   let timer=null;
-  const render=()=>{
-    const groups=getOptions(input.value);
+  let seq=0;
+  const render=async()=>{
+    const my=++seq;
+    const groups=await getOptions(input.value);
+    if(my!==seq) return;   // llegó una respuesta vieja
     const html=groups.map(g=>(g.title?`<div class="optgrp">${esc(g.title)}</div>`:"")+g.items.map((o,i)=>`<button type="button" class="opt" data-g="${groups.indexOf(g)}" data-i="${i}"><span>${esc(o.label)}</span>${o.sub?`<small>${esc(o.sub)}</small>`:""}</button>`).join("")).join("");
     pop.innerHTML=html; pop.hidden=!html; pop._groups=groups;
   };
@@ -147,7 +153,7 @@ function computeCorte(limit){
   if(regs.some(r=>r.asistio && !MUNDOS.includes(r.mundo))) cols.push("SIN CARRERA");
   const z=()=>Object.fromEntries(cols.map(c=>[c,0]));
   const t={padres:z(),otros:z(),egresados:z(),quinto:z(),nv:z(),singrado:z()};
-  const car={}; // por carrera
+  const car={}, ase={}; // por carrera y por asesor
   for(const r of regs){
     if(!r.asistio) continue;
     if(limit && r.hora && new Date(r.hora) > limit) continue;
@@ -161,7 +167,13 @@ function computeCorte(limit){
     const k=car[ck]=car[ck]||{carrera:ck,mundo:CARRERAS[ck]||m,padres:0,otros:0,egresados:0,quinto:0,nv:0,singrado:0};
     if(r.grado==="Ya acabo el colegio") k.egresados++; else if(r.grado==="5to") k.quinto++; else if(r.grado==="3ero"||r.grado==="4to") k.nv++; else k.singrado++;
     for(const a of (r.acomp||[])){ if(PADRES.has(a.tipo)) k.padres++; else k.otros++; }
+    const ak=(r.asesor||"").trim()||"Sin asesor";
+    const ka=ase[ak]=ase[ak]||{asesor:ak,padres:0,otros:0,egresados:0,quinto:0,nv:0,singrado:0};
+    if(r.grado==="Ya acabo el colegio") ka.egresados++; else if(r.grado==="5to") ka.quinto++; else if(r.grado==="3ero"||r.grado==="4to") ka.nv++; else ka.singrado++;
+    for(const a of (r.acomp||[])){ if(PADRES.has(a.tipo)) ka.padres++; else ka.otros++; }
   }
+  const byAsesor=Object.values(ase).map(k=>({...k,total:k.padres+k.otros+k.egresados+k.quinto+k.nv+k.singrado}))
+    .sort((a,b)=>(a.asesor==="Sin asesor")-(b.asesor==="Sin asesor") || b.total-a.total || a.asesor.localeCompare(b.asesor));
   const mOrder=m=>{ const i=MUNDOS.indexOf(m); return i<0?99:i; };
   const byCarrera=Object.values(car).map(k=>({...k,total:k.padres+k.otros+k.egresados+k.quinto+k.nv+k.singrado}))
     .sort((a,b)=>mOrder(a.mundo)-mOrder(b.mundo) || b.total-a.total || a.carrera.localeCompare(b.carrera));
@@ -178,7 +190,7 @@ function computeCorte(limit){
   ].filter(r=>!(r.hideZero && sum(r.v)===0)).map(r=>({...r,sum:sum(r.v)}));
   return {cols,rows,total:sum(total),
     alumnos:sum(t.egresados)+sum(t.quinto)+sum(t.nv)+sum(t.singrado),
-    padres:sum(t.padres)+sum(t.otros), vend:sum(t.egresados)+sum(t.quinto), nv:sum(t.nv), byMundo:total, byCarrera,
+    padres:sum(t.padres)+sum(t.otros), vend:sum(t.egresados)+sum(t.quinto), nv:sum(t.nv), byMundo:total, byCarrera, byAsesor,
     showOtros:sum(t.otros)>0, showSinGrado:sum(t.singrado)>0};
 }
 function carreraCols(c){
@@ -209,6 +221,12 @@ function renderCorte(){
         c.byCarrera.map((k,i,arr)=>`<tr${i>0&&arr[i-1].mundo!==k.mundo?' class="grpstart"':""}><td class="mundo">${i===0||arr[i-1].mundo!==k.mundo?esc(k.mundo):""}</td><td>${esc(k.carrera)}</td>${cc.map(([f])=>`<td${f==="total"?' class="rowtot"':""}>${k[f]}</td>`).join("")}</tr>`).join("")
       }<tr class="tot"><td colspan="2">Total</td>${cc.map(([f])=>`<td>${tot[f]}</td>`).join("")}</tr></tbody>`
     : `<tbody><tr><td style="color:var(--muted);padding:20px">Aún no hay asistentes en este corte.</td></tr></tbody>`;
+  const ta=Object.fromEntries(cc.map(([k])=>[k,c.byAsesor.reduce((a,x)=>a+x[k],0)]));
+  $("#asesorTable").innerHTML = c.byAsesor.length
+    ? `<thead><tr><th>Asesor</th>${cc.map(([,l])=>`<th>${l}</th>`).join("")}</tr></thead><tbody>${
+        c.byAsesor.map(k=>`<tr><td${k.asesor==="Sin asesor"?' style="color:var(--muted)"':""}>${esc(k.asesor)}</td>${cc.map(([f])=>`<td${f==="total"?' class="rowtot"':""}>${k[f]}</td>`).join("")}</tr>`).join("")
+      }<tr class="tot"><td>Total</td>${cc.map(([f])=>`<td>${ta[f]}</td>`).join("")}</tr></tbody>`
+    : `<tbody><tr><td style="color:var(--muted);padding:20px">Aún no hay asistentes en este corte.</td></tr></tbody>`;
 }
 function corteText(){
   const ev=curEvent(); const c=computeCorte(corteLimit());
@@ -222,6 +240,10 @@ function corteText(){
   if(c.byCarrera.length){
     L.push("", "*Por carrera*");
     for(const k of c.byCarrera) L.push(`• ${k.carrera}: ${k.total} (Padres ${k.padres} · Egres. ${k.egresados} · 5to ${k.quinto} · No vend. ${k.nv})`);
+  }
+  if(c.byAsesor.length){
+    L.push("", "*Por asesor*");
+    for(const k of c.byAsesor) L.push(`• ${k.asesor}: ${k.total} (Padres ${k.padres} · Egres. ${k.egresados} · 5to ${k.quinto} · No vend. ${k.nv})`);
   }
   return L.join("\n");
 }
@@ -264,20 +286,23 @@ function renderAcomp(){
   $("#acompList").innerHTML = acomp.map((a,i)=>`<div class="arow">
     <select data-i="${i}" data-k="tipo">${["Madre","Padre","Familiar","Estudiante"].map(t=>`<option ${a.tipo===t?"selected":""}>${t}</option>`).join("")}</select>
     <input class="an" type="text" data-i="${i}" data-k="nombre" placeholder="Nombres y apellidos" value="${esc(a.nombre)}">
-    <input type="tel" data-i="${i}" data-k="celular" placeholder="Celular" value="${esc(a.celular)}">
+    <input type="tel" data-i="${i}" data-k="celular" placeholder="Celular (9 dígitos)" inputmode="numeric" maxlength="9" value="${esc(a.celular)}">
     <button type="button" class="btn sm ghost" data-rm="${i}" aria-label="Quitar acompañante">Quitar</button></div>`).join("");
   $("#addAcomp").querySelectorAll("button").forEach(b=>b.disabled = acomp.length>=3);
 }
 function clearForm(){
   editingId=null;
-  ["fNombre","fCel","fDni","fProm","fCole","fCod","fDistrito","fEgreso","fCarrera"].forEach(id=>$("#"+id).value=""); selDist=null;
-  $("#fMundo").value=""; setGrado(null); acomp=[]; renderAcomp(); coleHint();
+  ["fNombre","fCel","fDni","fProm","fAsesor","fSubcanal","fCole","fCod","fDistrito","fEgreso","fCarrera"].forEach(id=>$("#"+id).value=""); selDist=null;
+  $("#fMundo").value=""; setGrado(null); acomp=[]; renderAcomp(); coleHint(); promHint();
   $("#formTitle").textContent="Nuevo asistente"; $("#formStatus").innerHTML="";
+  document.querySelectorAll("#regForm .err").forEach(f=>f.classList.remove("err")); document.querySelectorAll("#regForm .errmsg").forEach(m=>m.textContent="");
   $("#btnSave").textContent="Registrar llegada";
 }
 function loadIntoForm(r){
   editingId=r.id;
-  $("#fNombre").value=r.nombre||""; $("#fCel").value=r.celular||""; $("#fDni").value=r.dni||""; $("#fProm").value=r.id_prometeo||"";
+  $("#fNombre").value=r.nombre||""; $("#fCel").value=r.celular||""; $("#fDni").value=r.dni||""; $("#fProm").value=r.id_prometeo||""; $("#fAsesor").value=r.asesor||""; $("#fSubcanal").value=r.subcanal||"";
+  promHint();
+  if(!r.asesor){ if(r.id_prometeo) autoFillExact("prom", r.id_prometeo); else if(r.celular) autoFillExact("cel", r.celular); }
   $("#fMundo").value=MUNDOS.includes(r.mundo)?r.mundo:""; setCarrera(carreraExacta(r.carrera)||r.carrera||"");
   $("#fCod").value=r.cod_modular||""; $("#fCole").value=r.colegio||""; $("#fDistrito").value=r.distrito||""; selDist=colByCod.get(codMod(r.cod_modular))?._k||null;
   $("#fEgreso").value=r.egreso||""; setGrado(r.grado||null); if(r.egreso) $("#fEgreso").value=r.egreso;
@@ -289,20 +314,44 @@ function loadIntoForm(r){
   $("#results").innerHTML=""; $("#q").value="";
   $("#regForm").scrollIntoView({block:"nearest",behavior:"smooth"});
 }
+/* Validaciones: celular = 9 dígitos; documento (DNI 8 / CE 9) = 8 o 9 dígitos */
+const CEL_OK = c => /^\d{9}$/.test(c);
+const DOC_OK = d => /^\d{8,9}$/.test(d);
+function marcar(el, msg){
+  const f=el.closest(".f");
+  if(!f){ el.classList.toggle("inerr", !!msg); el.title=msg||""; return; }   // celulares de acompañantes
+  f.classList.toggle("err", !!msg);
+  let m=f.querySelector(":scope > .errmsg"); if(!m){ m=document.createElement("small"); m.className="errmsg"; f.appendChild(m); }
+  m.textContent=msg||"";
+}
+function validar(nombre,cel,dni,carrera){
+  const out=[]; const add=(el,msg)=>{ out.push({el,msg}); if(el) marcar(el,msg); };
+  document.querySelectorAll("#regForm .err").forEach(f=>f.classList.remove("err"));
+  document.querySelectorAll("#regForm .errmsg").forEach(m=>m.textContent="");
+  document.querySelectorAll("#regForm .inerr").forEach(i=>{ i.classList.remove("inerr"); i.title=""; });
+  if(!nombre) add($("#fNombre"),"Escribe el nombre");
+  if(!cel) add($("#fCel"),"Escribe el celular");
+  else if(!CEL_OK(cel)) add($("#fCel"),`El celular debe tener 9 dígitos (tiene ${cel.length})`);
+  if(dni && !DOC_OK(dni)) add($("#fDni"),`El documento debe tener 8 (DNI) o 9 dígitos (CE); tiene ${dni.length}`);
+  if(!carrera) add($("#fCarrera"),"Elige la carrera de la lista");
+  if(!grado) add($("#segGrado"),"Marca el grado");
+  acomp.forEach((a,i)=>{ const c=digits(a.celular); if(c && !CEL_OK(c)) add($(`#acompList [data-i="${i}"][data-k="celular"]`),`Celular del acompañante ${i+1}: debe tener 9 dígitos`); });
+  return out;
+}
 async function saveForm(ev){
   ev?.preventDefault();
   if(!eid){ toast("Primero crea o elige un evento","bad"); return; }
   const nombre=$("#fNombre").value.trim(), cel=digits($("#fCel").value), dni=digits($("#fDni").value);
   const carrera=carreraParecida($("#fCarrera").value);
-  const miss=[]; if(!nombre) miss.push("nombre"); if(!cel) miss.push("celular"); if(!carrera) miss.push("carrera (elígela de la lista)"); if(!grado) miss.push("grado");
-  if(miss.length){ toast("Falta: "+miss.join(", "),"bad"); return; }
+  const errs=validar(nombre,cel,dni,carrera);
+  if(errs.length){ toast(errs[0].msg+(errs.length>1?` (y ${errs.length-1} más)`:""),"bad"); errs[0].el?.focus(); return; }
   if(!editingId){
     const dup=regs.find(r=>digits(r.celular)===cel || (dni && digits(r.dni)===dni));
     if(dup){ toast(dup.asistio?`${dup.nombre} ya llegó (${fmtHora(dup.hora)}). Revisa sus datos.`:`${dup.nombre} ya estaba inscrito. Revisa y registra.`, dup.asistio?"bad":""); loadIntoForm(dup); return; }
   }
   const prev = editingId ? regs.find(r=>r.id===editingId) : null;
   const data={
-    evento_id:eid, nombre, celular:cel, dni, id_prometeo:digits($("#fProm").value),
+    evento_id:eid, nombre, celular:cel, dni, id_prometeo:digits($("#fProm").value), asesor:$("#fAsesor").value.trim(), subcanal:$("#fSubcanal").value.trim(),
     carrera, mundo:CARRERAS[carrera], grado, egreso:Number($("#fEgreso").value)||null,
     colegio:$("#fCole").value.trim(), cod_modular:codMod($("#fCod").value), distrito:$("#fDistrito").value.trim(),
     acomp:acomp.filter(a=>a.nombre.trim()||a.celular.trim()).map(a=>({tipo:a.tipo,nombre:a.nombre.trim(),celular:digits(a.celular)})),
@@ -321,6 +370,64 @@ async function saveForm(ev){
     clearForm(); window.scrollTo({top:0,behavior:"smooth"});
   }catch(e){ dbError(e); }
   finally{ $("#btnSave").disabled=false; }
+}
+
+/* ================= Base Prometeo en vivo (Google Sheets vía Apps Script) ================= */
+// La hoja nunca se descarga: cada búsqueda envía el token de la sesión y el script
+// responde como máximo 8 coincidencias, solo a usuarios @ucal.edu.pe con sesión válida.
+async function prometeoSearch(field, q){
+  if(!CFG.PROMETEO_URL || /PEGA_AQUI/.test(CFG.PROMETEO_URL)) return {items:[], off:true};
+  const qd=digits(q), qn=norm(q);
+  if((field==="nombre" && qn.length<4) || (field!=="nombre" && qd.length<3)) return {items:[]};
+  const key=field+"|"+(field==="nombre"?qn:qd);
+  if(promCache.has(key)) return promCache.get(key);
+  try{
+    const {data:{session:s}}=await sb.auth.getSession();
+    const res=await fetch(CFG.PROMETEO_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({token:s?.access_token||"",field,q:field==="nombre"?q:qd})});
+    const out=await res.json();
+    if(!out.ok) return {items:[], error:out.error||"error"};
+    const r={items:out.items||[]}; promCache.set(key,r); return r;
+  }catch(e){ console.error(e); return {items:[], error:"sin conexión con la base Prometeo"}; }
+}
+function baseOptions(field){
+  return async q=>{
+    const r=await prometeoSearch(field,q);
+    if(r.error) return [{title:"Base Prometeo: "+r.error, items:[]}];
+    const items=r.items.map(b=>({label:b.nombre||("ID "+b.id), sub:`ID ${b.id}${b.asesor?" · "+b.asesor:""}${field==="dni"&&b.dni?" · Doc. "+b.dni:b.celular?" · "+b.celular:""}`, b}));
+    return items.length?[{title:"Base Prometeo",items}]:[];
+  };
+}
+function pickBase(b, field){
+  $("#fProm").value=b.id; if(b.asesor) $("#fAsesor").value=b.asesor; if(b.subcanal) $("#fSubcanal").value=b.subcanal;
+  const nomActual=$("#fNombre").value.trim();
+  if(b.nombre && (field==="nombre" || !nomActual || (b.nombre.length>nomActual.length && textScore(nomActual,b.nombre)>=0.75))) $("#fNombre").value=b.nombre;
+  // si coincidió por el teléfono de un familiar, no se reemplaza lo que se escribió en Celular
+  if(b.celular && ((field==="cel" && !b.viaFamiliar) || !digits($("#fCel").value))) $("#fCel").value=digits(b.celular).slice(-9);
+  if(b.dni && (field==="dni" || !digits($("#fDni").value))) $("#fDni").value=digits(b.dni);
+  promHint(b, field==="acomp-exact" ? "encontrado por el celular del acompañante" : "");
+}
+/* Varias coincidencias exactas: se muestran para elegir, no se llena nada solo */
+let chooserItems=[], chooserTag="";
+function showChooser(items, field, tag, v){
+  chooserItems=items; chooserTag=tag||field+"-exact";
+  const que = field==="dni" ? `El documento ${v}` : field==="prom" ? `El ID ${v}` : tag==="acomp-exact" ? `El celular del acompañante (${v})` : `El celular ${v}`;
+  $("#promHint").innerHTML=`<div class="chooser"><div class="chooser-t"><span class="pill warn">${items.length} coincidencias</span> ${esc(que)} está en ${items.length} registros de la base Prometeo. Elige el que corresponde:</div>
+    <div class="chooser-list">${items.map((b,i)=>`<button type="button" class="chooser-opt" data-ci="${i}"><b>${esc(b.nombre||"Sin nombre")}</b><span>ID ${esc(b.id)}${b.asesor?` · ${esc(b.asesor)}`:""}${b.subcanal?` · ${esc(b.subcanal)}`:""}</span>${b.via?`<small>coincide en ${esc(b.via)}</small>`:b.dni?`<small>Doc. ${esc(b.dni)}</small>`:""}</button>`).join("")}</div></div>`;
+}
+function promHint(b, nota){
+  const h=$("#promHint"); if(!h) return;
+  h.innerHTML = b ? `<span class="pill ok">✓ Base Prometeo</span> ID ${esc(b.id)}${b.asesor?` · Asesor: <b>${esc(b.asesor)}</b>`:""}${b.subcanal?` · Subcanal 2: ${esc(b.subcanal)}`:""}${nota?` · <span class="pill blue">${esc(nota)}</span>`:b.viaFamiliar&&b.via?` · <span class="pill blue">por ${esc(b.via)}</span>`:""}` : "";
+}
+async function autoFillExact(field, value, inputEl, tag){
+  const r=await prometeoSearch(field,value);
+  const v=digits(value), inp=inputEl || $({prom:"#fProm",cel:"#fCel",dni:"#fDni"}[field]);
+  // en teléfono basta con que el número exista en alguna columna (alumno o familiar): el script ya filtró
+  const exactas=r.items.filter(b=> field==="prom" ? digits(b.id)===v : field==="dni" ? digits(b.dni)===v : b.s===1);
+  // un mismo ID puede repetirse en varias filas: se cuentan IDs distintos
+  const ids=[...new Map(exactas.map(b=>[b.id+"|"+(b.asesor||""),b])).values()];
+  if(!ids.length || digits(inp.value)!==v) return;
+  if(ids.length===1) pickBase(ids[0], tag || field+"-exact");
+  else showChooser(ids, field, tag, v);
 }
 
 /* ================= Colegios ================= */
@@ -399,7 +506,7 @@ function renderResults(){
   if(!q.trim()){ $("#results").innerHTML=""; return; }
   if(!res.length){ $("#results").innerHTML=`<div class="res" style="cursor:default"><span>No se encontró a nadie parecido. Llena el formulario como nuevo asistente.</span><button type="button" class="btn sm" id="btnUseQ">Usar como nombre</button></div>`; return; }
   $("#results").innerHTML=res.map(({r,s})=>`<button type="button" class="res" data-id="${esc(r.id)}">
-    <div><b>${esc(r.nombre)}</b><div class="sub num">${esc(r.celular||"")}${r.dni?" · DNI "+esc(r.dni):""}${r.carrera?" · "+esc(r.carrera):""}</div></div>
+    <div><b>${esc(r.nombre)}</b><div class="sub num">${esc(r.celular||"")}${r.dni?" · Doc. "+esc(r.dni):""}${r.carrera?" · "+esc(r.carrera):""}</div></div>
     <div style="display:flex;gap:8px;align-items:center"><span class="pct num">${Math.round(s*100)}%</span>${r.asistio?`<span class="pill ok">Ya llegó ${fmtHora(r.hora)}</span>`:r.confirmo==="Si"?`<span class="pill blue">Confirmó</span>`:`<span class="pill pend">Inscrito</span>`}</div></button>`).join("");
 }
 
@@ -411,9 +518,10 @@ function renderLista(){
   if(norm(q)){ const qd=digits(q); rows=rows.filter(r=> textScore(q,[r.nombre,r.carrera,r.mundo,r.colegio,r.distrito].join(" "))>=0.75 || (qd.length>=3 && (digits(r.celular).includes(qd)||digits(r.dni).includes(qd)))); }
   rows.sort((a,b)=> filtro==="asis" ? String(b.hora||"").localeCompare(String(a.hora||"")) : String(a.nombre).localeCompare(b.nombre));
   if(!rows.length){ $("#listaTable").innerHTML=`<tbody><tr><td style="text-align:center;color:var(--muted);padding:24px">${regs.length?"No hay personas con este filtro.":"Todavía no hay registros en este evento. Registra la primera llegada o importa la lista de inscritos."}</td></tr></tbody>`; return; }
-  $("#listaTable").innerHTML=`<thead><tr><th>Llegada</th><th>Nombres y apellidos</th><th>Celular</th><th>Carrera</th><th>Mundo</th><th>Grado</th><th>Colegio</th><th>Acompañantes</th><th>Registrador</th><th></th></tr></thead><tbody>${
+  $("#listaTable").innerHTML=`<thead><tr><th>Llegada</th><th>ID Prometeo</th><th>Asesor</th><th>Subcanal 2</th><th>Nombres y apellidos</th><th>Celular</th><th>Carrera</th><th>Mundo</th><th>Grado</th><th>Colegio</th><th>Acompañantes</th><th>Registrador</th><th></th></tr></thead><tbody>${
     rows.map(r=>`<tr>
       <td>${r.asistio?`<span class="pill ok">${fmtHora(r.hora)}</span>`:`<span class="pill pend">${r.confirmo==="Si"?"Confirmó":"Pendiente"}</span>`}</td>
+      <td class="num">${esc(r.id_prometeo||"—")}</td><td>${esc(r.asesor||"—")}</td><td>${esc(r.subcanal||"—")}</td>
       <td class="wrap">${esc(r.nombre)}</td><td class="num">${esc(r.celular)}</td><td>${esc(r.carrera||"—")}</td><td>${esc(r.mundo||"—")}</td>
       <td>${r.grado==="3ero"||r.grado==="4to"?`<span class="pill warn">${esc(r.grado)}</span>`:esc(gradoLabel(r.grado))}</td>
       <td class="wrap">${esc(r.colegio||"—")}${r.distrito?`<div class="hint">${esc(r.distrito)}</div>`:""}</td>
@@ -432,7 +540,7 @@ function renderEventos(){
   $("#evSelect").innerHTML = sorted.length ? sorted.map(e=>`<option value="${esc(e.id)}" ${e.id===eid?"selected":""}>${esc(e.nombre)}</option>`).join("") : `<option value="">Sin eventos</option>`;
   const e=curEvent(); $("#evTitle").textContent = e ? e.nombre : "Registro de asistentes";
 }
-function renderAll(){ renderEventos(); renderLive(); renderResults(); renderLista(); renderCorte(); }
+function renderAll(){ const ases=[...new Set(regs.map(r=>r.asesor).filter(Boolean))].sort(); $("#asesorList").innerHTML=ases.map(a=>`<option value="${esc(a)}">`).join(""); renderEventos(); renderLive(); renderResults(); renderLista(); renderCorte(); }
 async function fetchAll(table, evId){
   const out=[]; const size=1000;
   for(let from=0;;from+=size){
@@ -518,17 +626,18 @@ async function importInscritos(file){
     const mundoTxt=norm(get(r,"mundo")).toUpperCase(); const mundo=CARRERAS[carrera] || MUNDOS.find(m=>norm(m).toUpperCase()===mundoTxt) || "";
     const acompArr=Object.keys(acIdx).sort().map(k=>acIdx[k]).map(a=>({tipo:a.tipo!=null?String(r[a.tipo]).trim():"",nombre:a.nombre!=null?String(r[a.nombre]).trim():"",celular:a.celular!=null?digits(r[a.celular]):""})).filter(a=>a.nombre||a.tipo).map(a=>({...a,tipo:["Madre","Padre","Familiar","Estudiante"].find(t=>norm(t)===norm(a.tipo))||"Familiar"}));
     const regis=get(r,"registrador"); const cod=codMod(get(r,"cod_modular")); const col=colByCod.get(cod);
+    const idp=digits(get(r,"id_prometeo"));
     const g=norm(get(r,"grado"));
     return {
-      evento_id:eid, nombre:get(r,"nombre"), celular:digits(get(r,"celular")), dni:digits(get(r,"dni")), id_prometeo:digits(get(r,"id_prometeo")),
+      evento_id:eid, nombre:get(r,"nombre"), celular:digits(get(r,"celular")), dni:digits(get(r,"dni")), id_prometeo:idp,
       carrera, mundo, grado: !g?"": g.startsWith("ya")||g.includes("egres")?"Ya acabo el colegio": g.startsWith("5")?"5to": g.startsWith("4")?"4to": g.startsWith("3")?"3ero": get(r,"grado"),
       egreso:Number(digits(get(r,"egreso")))||null, cod_modular:cod, colegio:get(r,"colegio")||col?.nombre||"", distrito:get(r,"distrito")||col?.distrito||"",
-      confirmo: norm(get(r,"confirmo"))==="si"?"Si":(get(r,"confirmo")?"No":""), registrador:regis, acomp:acompArr,
+      asesor:get(r,"asesor"), subcanal:get(r,"subcanal"), confirmo: norm(get(r,"confirmo"))==="si"?"Si":(get(r,"confirmo")?"No":""), registrador:regis, acomp:acompArr,
       asistio:!!regis, hora:null, origen:"import"
     };
   }).filter(r=>r.nombre);
   // Misma persona = mismo celular o DNI y nombre parecido. Se combinan en un solo registro.
-  const FIELDS=["celular","dni","id_prometeo","carrera","mundo","grado","egreso","cod_modular","colegio","distrito","confirmo"];
+  const FIELDS=["celular","dni","id_prometeo","asesor","subcanal","carrera","mundo","grado","egreso","cod_modular","colegio","distrito","confirmo"];
   const keysOf=r=>[r.celular&&"c"+r.celular, r.dni&&"d"+r.dni].filter(Boolean);
   const samePerson=(a,b)=>Math.max(textScore(a.nombre,b.nombre),textScore(b.nombre,a.nombre))>=0.6;
   const index=new Map(); const addIdx=r=>keysOf(r).forEach(k=>{ if(!index.has(k)) index.set(k,[]); index.get(k).push(r); });
@@ -563,7 +672,7 @@ async function importInscritos(file){
     upsertLocal(regs,data); upd++; prog();
   }
   renderAll();
-  setStatus(st,`<span class="ok">Listo: ${ok} inscritos cargados en "${esc(curEvent()?.nombre||"")}"${upd?` y ${upd} actualizados`:""}.</span>${combinados?`<span>${combinados} filas eran la misma persona (mismo celular o DNI y nombre parecido) y se combinaron en un solo registro.</span>`:""}<span class="hint">Columnas usadas: ${esc(Object.keys(sh.map).map(f=>COLS_INSCRITOS.find(c=>c.f===f).label).join(" · "))}${Object.keys(acIdx).length?" · acompañantes":""}${ignored.length?` — no usadas: ${esc(ignored.join(" · "))}`:""}</span>`);
+  setStatus(st,`<span class="ok">Listo: ${ok} inscritos cargados en "${esc(curEvent()?.nombre||"")}"${upd?` y ${upd} actualizados`:""}.</span>${combinados?`<span>${combinados} filas eran la misma persona (mismo celular o documento y nombre parecido) y se combinaron en un solo registro.</span>`:""}<span class="hint">Columnas usadas: ${esc(Object.keys(sh.map).map(f=>COLS_INSCRITOS.find(c=>c.f===f).label).join(" · "))}${Object.keys(acIdx).length?" · acompañantes":""}${ignored.length?` — no usadas: ${esc(ignored.join(" · "))}`:""}</span>`);
   toast(`${ok} inscritos cargados`,"ok");
 }
 async function importColegios(file){
@@ -589,23 +698,25 @@ async function importColegios(file){
 
 /* ================= Exportar ================= */
 function regsSheet(){
-  const H=["Registrador","ID Prometeo","Nombres y Apellidos","DNI","Celular","Carrera","Mundo","¿Confirmó asistencia?","Cod Modular","Nombre Colegio","¿En qué grado está?","Año egreso de cole"];
+  const H=["Registrador","ID Prometeo","Asesor","Subcanal 2","Nombres y Apellidos","Documento (DNI/CE)","Celular","Carrera","Mundo","¿Confirmó asistencia?","Cod Modular","Nombre Colegio","¿En qué grado está?","Año egreso de cole"];
   for(const s of [""," 2"," 3"]) H.push("¿Tiene acompañante?"+s,"¿Quien es?"+s,"Nombres y apellidos del acompañante"+s,"Celular del acompañante"+s);
   H.push("Distrito colegio","Asistió","Hora de llegada");
   const num=v=>v&&/^\d+$/.test(v)&&!/^0/.test(v)?Number(v):(v||"");
   const data=[...regs].sort((a,b)=>String(a.nombre).localeCompare(b.nombre)).map(r=>{
-    const row=[r.asistio?r.registrador:"",num(r.id_prometeo),r.nombre,num(r.dni),num(r.celular),r.carrera,r.mundo,r.confirmo||"",r.cod_modular||"",r.colegio,r.grado,r.egreso||""];
+    const row=[r.asistio?r.registrador:"",num(r.id_prometeo),r.asesor||"",r.subcanal||"",r.nombre,num(r.dni),num(r.celular),r.carrera,r.mundo,r.confirmo||"",r.cod_modular||"",r.colegio,r.grado,r.egreso||""];
     for(let i=0;i<3;i++){ const a=(r.acomp||[])[i]; row.push(a?"Si":"",a?a.tipo:"",a?a.nombre:"",a?num(a.celular):""); }
     row.push(r.distrito||"", r.asistio?"Si":"No", r.hora?new Date(r.hora).toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit",hour12:false}):"");
     return row;
   });
-  const ws=XLSX.utils.aoa_to_sheet([H,...data]); ws["!cols"]=H.map((h,i)=>({wch:i===2||i===9?32:16})); return ws;
+  const ws=XLSX.utils.aoa_to_sheet([H,...data]); ws["!cols"]=H.map((h,i)=>({wch:i===4||i===11?32:16})); return ws;
 }
 function corteSheet(){
   const ev=curEvent(); const c=computeCorte(corteLimit()); const cc=carreraCols(c);
   const aoa=[[`Total asistentes - ${corteLabel()}`],[],[ev?.nombre||"Evento",...c.cols,"TOTAL"],...c.rows.map(r=>[r.label,...c.cols.map(m=>r.v[m]),r.sum]),[],
     ["Por carrera"],["Mundo","Carrera",...cc.map(([,l])=>l)],...c.byCarrera.map(k=>[k.mundo,k.carrera,...cc.map(([f])=>k[f])]),
     ["Total","",...cc.map(([f])=>c.byCarrera.reduce((a,x)=>a+x[f],0))],[],
+    ["Por asesor"],["Asesor","",...cc.map(([,l])=>l)],...c.byAsesor.map(k=>[k.asesor,"",...cc.map(([f])=>k[f])]),
+    ["Total","",...cc.map(([f])=>c.byAsesor.reduce((a,x)=>a+x[f],0))],[],
     ["* Alumnos egresados: ya acabaron el colegio."],["* No vendibles: 3ero o 4to de secundaria."],["* Padres: acompañantes registrados como madre, padre o familiar."]];
   const ws=XLSX.utils.aoa_to_sheet(aoa); ws["!cols"]=[{wch:38},{wch:40},...cc.map(()=>({wch:18}))]; return ws;
 }
@@ -637,6 +748,20 @@ function bindUI(){
   });
 
   // mundo ↔ carrera
+  combo($("#fProm"),$("#popProm"),baseOptions("prom"),o=>pickBase(o.b,"prom"));
+  combo($("#fNombre"),$("#popNombre"),baseOptions("nombre"),o=>pickBase(o.b,"nombre"));
+  combo($("#fCel"),$("#popCel"),baseOptions("cel"),o=>pickBase(o.b,"cel"));
+  combo($("#fDni"),$("#popDni"),baseOptions("dni"),o=>pickBase(o.b,"dni"));
+  $("#promHint").addEventListener("click",e=>{ const o=e.target.closest("[data-ci]"); if(o) pickBase(chooserItems[+o.dataset.ci], chooserTag); });
+  const soloDigitos=(el,max)=>{ const v=digits(el.value).slice(0,max); if(el.value!==v) el.value=v; };
+  $("#fCel").addEventListener("input",e=>{ soloDigitos(e.target,9); marcar(e.target,""); }, true);
+  $("#fDni").addEventListener("input",e=>{ soloDigitos(e.target,9); marcar(e.target,""); }, true);
+  $("#fCel").addEventListener("blur",e=>{ const c=digits(e.target.value); marcar(e.target, c && !CEL_OK(c) ? `Debe tener 9 dígitos (tiene ${c.length})` : ""); });
+  $("#fDni").addEventListener("blur",e=>{ const d=digits(e.target.value); marcar(e.target, d && !DOC_OK(d) ? `Debe tener 8 (DNI) o 9 dígitos (CE)` : ""); });
+  $("#fDni").addEventListener("input",()=>{ const d=digits($("#fDni").value); if(DOC_OK(d) && !digits($("#fProm").value)) autoFillExact("dni",d); });
+  let tProm=null;
+  $("#fProm").addEventListener("input",()=>{ promHint(); clearTimeout(tProm); const v=digits($("#fProm").value); if(v.length>=5) tProm=setTimeout(()=>autoFillExact("prom",v),500); });
+  $("#fCel").addEventListener("input",()=>{ const c=digits($("#fCel").value); if(c.length===9 && !digits($("#fProm").value)) autoFillExact("cel",c); });
   const cCar=combo($("#fCarrera"),$("#popCarrera"),carreraOptions,o=>setCarrera(o.value));
   $("#fCarrera").addEventListener("change",()=>{ const c=carreraParecida($("#fCarrera").value); if(c) setCarrera(c); });
   $("#fMundo").addEventListener("change",()=>{ const c=carreraExacta($("#fCarrera").value); if(c && CARRERAS[c]!==$("#fMundo").value && $("#fMundo").value) $("#fCarrera").value=""; $("#fCarrera").focus(); });
@@ -649,7 +774,10 @@ function bindUI(){
 
   $("#segGrado").addEventListener("click",e=>{ const b=e.target.closest("button"); if(b) setGrado(b.dataset.v); });
   $("#addAcomp").addEventListener("click",e=>{ const b=e.target.closest("[data-t]"); if(!b||acomp.length>=3) return; acomp.push({tipo:b.dataset.t,nombre:"",celular:""}); renderAcomp(); $(`#acompList [data-i="${acomp.length-1}"][data-k="nombre"]`)?.focus(); });
-  const accSync=e=>{ const el=e.target; if(el.dataset.i!=null) acomp[+el.dataset.i][el.dataset.k]=el.value; };
+  const accSync=e=>{ const el=e.target; if(el.dataset.i==null) return;
+    if(el.dataset.k==="celular"){ const v=digits(el.value).slice(0,9); if(el.value!==v) el.value=v; }
+    acomp[+el.dataset.i][el.dataset.k]=el.value;
+    if(e.type==="input" && el.dataset.k==="celular"){ const c=digits(el.value); if(c.length===9 && !digits($("#fProm").value)) autoFillExact("cel",c,el,"acomp-exact"); } };
   $("#acompList").addEventListener("input",accSync); $("#acompList").addEventListener("change",accSync);
   $("#acompList").addEventListener("click",e=>{ const b=e.target.closest("[data-rm]"); if(b){ acomp.splice(+b.dataset.rm,1); renderAcomp(); } });
   $("#btnClear").addEventListener("click",clearForm);
@@ -674,7 +802,7 @@ function bindUI(){
   $("#btnCopy").addEventListener("click",()=>{
     const txt=corteText();
     navigator.clipboard.writeText(txt).then(()=>toast("Corte copiado. Pégalo en WhatsApp.","ok")).catch(()=>{
-      const ta=document.createElement("textarea"); ta.value=txt; ta.style.cssText="width:100%;height:220px"; $("#carreraWrap").after(ta); ta.select(); toast("Copia el texto seleccionado");
+      const ta=document.createElement("textarea"); ta.value=txt; ta.style.cssText="width:100%;height:220px"; $("#asesorWrap").after(ta); ta.select(); toast("Copia el texto seleccionado");
     });
   });
   $("#btnExportCorte").addEventListener("click",exportXlsx);

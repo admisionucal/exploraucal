@@ -121,6 +121,31 @@ tr:last-child td{border-bottom:0}
 .gradorow{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-end}
 .gradorow .f{gap:8px}
 .gradorow .egreso{width:140px}
+.s3{grid-column:span 3}
+@media (max-width:640px){.s3{grid-column:1/-1}}
+.lbl{font-size:12px;color:var(--muted);font-weight:600}
+.seg.fill,.addacomp.fill{display:flex;flex-wrap:nowrap;gap:6px}
+.seg.fill button,.addacomp.fill .btn{white-space:nowrap;flex:1 1 0;justify-content:center;min-width:0;padding:0 8px;height:38px}
+@media (max-width:640px){.seg.fill,.addacomp.fill{flex-wrap:wrap}.seg.fill button,.addacomp.fill .btn{flex:1 1 40%}}
+.btn.wide{width:100%;justify-content:center}
+.actions .btn.wide{flex:1}
+.promhint:empty,#coleHint:empty{display:none}
+.f.err input,.f.err select{border-color:var(--bad);background:var(--bad-soft)}
+.f.err .seg button{border-color:var(--bad)}
+.errmsg{color:var(--bad);font-size:12px;font-weight:600}
+.errmsg:empty{display:none}
+input.inerr{border-color:var(--bad);background:var(--bad-soft)}
+#regForm .grid{align-items:start}
+.pop{min-width:min(380px,calc(100vw - 32px))}
+.opt{align-items:baseline}
+.opt span{min-width:0}
+.chooser{border:1px solid #f0d9b5;background:var(--warn-soft);border-radius:var(--r);padding:10px;display:flex;flex-direction:column;gap:8px}
+.chooser-t{color:var(--ink);font-size:13px}
+.chooser-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.chooser-opt{appearance:none;text-align:left;background:#fff;border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;cursor:pointer;display:flex;flex-direction:column;gap:2px;font:inherit;color:var(--ink)}
+.chooser-opt:hover{border-color:var(--blue);background:var(--blue-soft)}
+.chooser-opt span{font-size:12px;color:var(--muted)}
+.chooser-opt small{font-size:11px;color:var(--blue)}
 .notes{list-style:none;margin:0;padding:0;color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:2px}
 .corte.carrera tr.grpstart td{border-top:2px solid var(--line-strong)}
 .corte.carrera td.mundo{font-weight:700;color:var(--blue);font-size:12px;letter-spacing:.03em}
@@ -243,7 +268,7 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
         <div class="col">
           <div class="searchbox">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-            <input type="search" id="q" placeholder="Buscar inscrito por nombre, celular, DNI o ID Prometeo" autocomplete="off">
+            <input type="search" id="q" placeholder="Buscar inscrito por nombre, celular, documento o ID Prometeo" autocomplete="off">
           </div>
           <div class="results" id="results"></div>
 
@@ -257,24 +282,25 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
             </div>
 
             <div class="grid">
-              <label class="f s2"><span>Nombres y apellidos *</span><input type="text" id="fNombre"></label>
-              <label class="f"><span>Celular *</span><input type="tel" id="fCel" inputmode="numeric"></label>
-              <label class="f"><span>DNI</span><input type="text" id="fDni" inputmode="numeric"></label>
+              <div class="f combo"><label class="f"><span>ID Prometeo</span><input type="text" id="fProm" inputmode="numeric" placeholder="Escribe el ID"></label><div class="pop" id="popProm" hidden></div></div>
+              <label class="f s2"><span>Asesor</span><input type="text" id="fAsesor" list="asesorList" placeholder="Se completa con la base Prometeo"></label>
+              <label class="f"><span>Subcanal 2</span><input type="text" id="fSubcanal" placeholder="De la base Prometeo"></label>
+              <datalist id="asesorList"></datalist>
+              <p class="hint s4 promhint" id="promHint"></p>
+              <div class="f s2 combo"><label class="f"><span>Nombres y apellidos *</span><input type="text" id="fNombre"></label><div class="pop" id="popNombre" hidden></div></div>
+              <div class="f s2 combo"><label class="f"><span>Documento (DNI o Carné de Extranjería)</span><input type="text" id="fDni" inputmode="numeric" maxlength="9" placeholder="8 o 9 dígitos"></label><div class="pop" id="popDni" hidden></div></div>
+              <div class="f combo"><label class="f"><span>Celular *</span><input type="tel" id="fCel" inputmode="numeric" maxlength="9" placeholder="9 dígitos"></label><div class="pop" id="popCel" hidden></div></div>
               <label class="f"><span>Mundo</span><select id="fMundo"></select></label>
               <div class="f s2 combo"><label class="f"><span>Carrera *</span><input type="text" id="fCarrera" placeholder="Escribe o elige la carrera"></label><div class="pop" id="popCarrera" hidden></div></div>
-              <label class="f"><span>ID Prometeo</span><input type="text" id="fProm" inputmode="numeric"></label>
-            </div>
-
-            <div class="gradorow">
-              <div class="f"><span class="sect">¿En qué grado está? *</span>
-                <div class="seg" id="segGrado">
+              <div class="f s3"><span class="lbl">¿En qué grado está? *</span>
+                <div class="seg fill" id="segGrado">
                   <button type="button" class="nv" data-v="3ero" aria-pressed="false">3ero</button>
                   <button type="button" class="nv" data-v="4to" aria-pressed="false">4to</button>
                   <button type="button" data-v="5to" aria-pressed="false">5to</button>
-                  <button type="button" data-v="Ya acabo el colegio" aria-pressed="false">Ya acabó el colegio</button>
+                  <button type="button" data-v="Ya acabo el colegio" aria-pressed="false">Ya acabó</button>
                 </div>
               </div>
-              <label class="f egreso"><span>Año de egreso</span><input type="number" id="fEgreso" min="1990" max="2040"></label>
+              <label class="f"><span>Año de egreso</span><input type="number" id="fEgreso" min="1990" max="2040"></label>
             </div>
 
             <div class="sect">Colegio</div>
@@ -287,8 +313,7 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
 
             <div class="sect">Acompañantes</div>
             <div class="acomp" id="acompList"></div>
-            <div class="addacomp" id="addAcomp">
-              <span class="hint">Agregar:</span>
+            <div class="addacomp fill" id="addAcomp">
               <button type="button" class="btn sm" data-t="Madre">+ Madre</button>
               <button type="button" class="btn sm" data-t="Padre">+ Padre</button>
               <button type="button" class="btn sm" data-t="Familiar">+ Familiar</button>
@@ -296,7 +321,7 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
             </div>
 
             <div class="actions">
-              <button class="btn big primary" type="submit" id="btnSave">Registrar llegada</button>
+              <button class="btn big primary wide" type="submit" id="btnSave">Registrar llegada</button>
             </div>
           </form>
         </div>
@@ -338,6 +363,8 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
         </ul>
         <h2 class="corte-title" style="margin-top:8px">Por carrera</h2>
         <div class="tablewrap" id="carreraWrap"><table class="corte carrera" id="carreraTable"></table></div>
+        <h2 class="corte-title" style="margin-top:8px">Por asesor</h2>
+        <div class="tablewrap" id="asesorWrap"><table class="corte" id="asesorTable"></table></div>
       </div>
     </div>
 
@@ -371,7 +398,7 @@ kbd{font-family:ui-monospace,monospace;font-size:11px;border:1px solid var(--lin
           </div>
           <div class="drop" data-kind="inscritos">
             <b>Arrastra aquí el Excel de inscritos</b>
-            <span class="hint">.xlsx o .csv · si una persona ya está (mismo celular o DNI y nombre parecido), se combina en vez de duplicarse</span>
+            <span class="hint">.xlsx o .csv · si una persona ya está (mismo celular o documento y nombre parecido), se combina en vez de duplicarse</span>
             <label class="btn" for="fileIns">Elegir archivo</label>
             <input type="file" id="fileIns" accept=".xlsx,.xls,.csv" hidden>
           </div>
