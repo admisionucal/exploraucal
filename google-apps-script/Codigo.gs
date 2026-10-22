@@ -5,32 +5,38 @@
  * La hoja NO se comparte ni se publica. Este script:
  *   - solo responde si la consulta trae una sesión válida de la página
  *     (la verifica con Supabase) y el correo es @ucal.edu.pe;
- *   - devuelve como máximo 8 coincidencias por búsqueda, nunca la hoja completa;
  *   - busca por ID PROMETEO, NOMBRES, NUMERO DE DOCUMENTO y en todas las columnas de teléfono
  *     (Telefono 1, Telefono 2 y las de padre/madre/familiar si existen);
  *   - devuelve ID, asesor (ASESOR ULT TIP DF SN CONTC) y SUBCANAL 2 (si existe);
+ *   - devuelve como máximo 8 coincidencias por búsqueda, nunca la hoja completa;
  *   - pide al menos 3 dígitos o 4 letras;
  *   - limita a 40 búsquedas por minuto por usuario.
+ *
+ * VELOCIDAD: para no leer toda la hoja en cada búsqueda, el script guarda un índice
+ * (ID, nombre, documento, teléfonos y n° de fila) en la caché interna de Google y lo
+ * renueva cada 10 minutos. Ejecuta UNA VEZ la función "instalar" desde el editor.
  */
 
-// ====== CONFIGURACIÓN (copia los mismos datos de config.js) ======
+// ====== CONFIGURACIÓN ======
 const SUPABASE_URL      = 'https://ixvvwaadxfpssgekyjjx.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_wFOiAOr24jMrzHbspmJN3w_5Azizzbk';
 const DOMINIO           = 'ucal.edu.pe';
 const NOMBRE_HOJA       = '';   // vacío = primera pestaña; o escribe el nombre exacto de la pestaña
 const MAX_RESULTADOS    = 8;
 const MAX_POR_MINUTO    = 40;
+const MINUTOS_INDICE    = 10;   // cada cuánto se renueva el índice
 
-// Nombres de columna aceptados (sin tildes ni mayúsculas)
+// Nombres de columna aceptados (sin tildes ni mayúsculas; los signos se ignoran)
 const COLUMNAS = {
   id:      ['id prometeo', 'id', 'prometeo', 'codigo prometeo', 'id_prometeo'],
   nombre:  ['nombres', 'nombre', 'nombres y apellidos', 'nombre completo', 'alumno', 'prospecto', 'lead'],
   dni:     ['numero de documento', 'nro de documento', 'nro documento', 'documento', 'dni', 'numero documento'],
   asesor:  ['asesor ult tip df sn contc', 'asesor', 'asesora', 'asesor comercial', 'ejecutivo', 'ejecutiva', 'promotor', 'vendedor', 'responsable', 'asesor asignado'],
-  subcanal:['subcanal 2', 'subcanal2', 'sub canal 2']   // opcional: si no existe, se devuelve vacío
+  subcanal:['subcanal 2', 'subcanal2', 'sub canal 2']
 };
-// Teléfonos: se busca en TODAS las columnas cuyo nombre contenga telefono / celular / movil / whatsapp
-// (Telefono 1, Telefono 2, Celular Madre, Telefono Padre, Celular Apoderado…)
+// Si no hay coincidencia exacta, se usa la primera columna que EMPIECE con esto
+const PREFIJOS = { asesor: 'asesor', subcanal: 'subcanal 2' };
+// Teléfonos: TODAS las columnas cuyo nombre contenga telefono / celular / movil / whatsapp
 const RE_TELEFONO = /(telefono|celular|movil|whatsapp)/;
 const RE_FAMILIAR = /(padre|madre|apoderad|familiar|tutor|acompanante)/;
 
@@ -43,6 +49,8 @@ function doPost(e) {
     if (!dentroDelLimite_(email)) return json_({ ok: false, error: 'demasiadas búsquedas, espera un minuto' });
 
     const field = String(body.field || '');
+    if (field === 'diag') return json_({ ok: true, diag: diagnostico_() });
+
     const q = String(body.q || '').trim();
     const qd = q.replace(/\D/g, '');
     if (field === 'nombre' ? norm_(q).length < 4 : qd.length < 3) return json_({ ok: true, items: [] });
@@ -50,12 +58,26 @@ function doPost(e) {
     return json_({ ok: true, items: buscar_(field, q, qd) });
   } catch (err) {
     console.error(err);
-    return json_({ ok: false, error: 'error en la búsqueda' });
+    return json_({ ok: false, error: 'error en la búsqueda: ' + String(err && err.message || err).slice(0, 120) });
   }
 }
 
 function doGet() {
   return json_({ ok: false, error: 'usa la página de registro' });
+}
+
+// ====== Instalación (ejecutar una vez desde el editor) ======
+function instalar() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'actualizarIndice').forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('actualizarIndice').timeBased().everyMinutes(MINUTOS_INDICE).create();
+  const n = actualizarIndice();
+  console.log('Listo. Índice con ' + n + ' filas. Se renovará cada ' + MINUTOS_INDICE + ' minutos.');
+}
+function actualizarIndice() {
+  PropertiesService.getScriptProperties().deleteProperty('idx_error');
+  const idx = construirIndice_();
+  guardarIndice_(idx);
+  return idx.filas.length;
 }
 
 // ====== Seguridad ======
@@ -76,7 +98,6 @@ function validarSesion_(token) {
   cache.put(key, email, 600); // 10 minutos
   return email;
 }
-
 function dentroDelLimite_(email) {
   const cache = CacheService.getScriptCache();
   const key = 'rate_' + email + '_' + Math.floor(Date.now() / 60000);
@@ -85,71 +106,174 @@ function dentroDelLimite_(email) {
   return n <= MAX_POR_MINUTO;
 }
 
-// ====== Búsqueda ======
-function buscar_(field, q, qd) {
-  const sh = NOMBRE_HOJA ? SpreadsheetApp.getActive().getSheetByName(NOMBRE_HOJA) : SpreadsheetApp.getActive().getSheets()[0];
-  const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
-  if (lastRow < 2) return [];
-  const heads = sh.getRange(1, 1, 1, lastCol).getDisplayValues()[0].map(norm_);
+// ====== Hoja y columnas ======
+function hoja_() {
+  return NOMBRE_HOJA ? SpreadsheetApp.getActive().getSheetByName(NOMBRE_HOJA) : SpreadsheetApp.getActive().getSheets()[0];
+}
+function columnas_(sh) {
+  const lastCol = sh.getLastColumn();
+  const txt = sh.getRange(1, 1, 1, lastCol).getDisplayValues()[0];
+  const heads = txt.map(norm_);
   const col = {};
   Object.keys(COLUMNAS).forEach(k => {
     for (const alias of COLUMNAS[k]) { const i = heads.indexOf(alias); if (i >= 0) { col[k] = i + 1; break; } }
+    if (!col[k] && PREFIJOS[k]) { const i = heads.findIndex(h => h.indexOf(PREFIJOS[k]) === 0); if (i >= 0) col[k] = i + 1; }
   });
-  const telCols = heads.map((h, i) => RE_TELEFONO.test(h) ? i + 1 : 0).filter(Boolean);
-  const headsTxt = sh.getRange(1, 1, 1, lastCol).getDisplayValues()[0];
-  if (!col.id) throw new Error('No se encontró la columna ID Prometeo');
+  const tel = heads.map((h, i) => RE_TELEFONO.test(h) ? i + 1 : 0).filter(Boolean);
+  return { col, tel, heads, txt, lastCol };
+}
 
-  const n = lastRow - 1;
-  const leer = c => c ? sh.getRange(2, c, n, 1).getDisplayValues().map(r => r[0]) : null;
-  let scored = [];
-
-  if (field === 'prom') {
-    const ids = leer(col.id);
-    ids.forEach((v, i) => { const d = String(v).replace(/\D/g, ''); if (d && d.indexOf(qd) >= 0) scored.push({ i, s: d === qd ? 1 : 0.9 }); });
-  } else if (field === 'dni') {
-    if (!col.dni) return [];
-    const docs = leer(col.dni).map(v => String(v).replace(/\D/g, ''));
-    docs.forEach((v, i) => { if (v && v.indexOf(qd) >= 0) scored.push({ i, s: v === qd ? 1 : 0.9 }); });
-  } else if (field === 'cel') {
-    if (!telCols.length) return [];
-    const best = {};   // fila -> {s, c}
-    const anota = (i, s, c) => { if (!best[i] || s > best[i].s || (s === best[i].s && RE_FAMILIAR.test(heads[best[i].c - 1]) && !RE_FAMILIAR.test(heads[c - 1]))) best[i] = { s, c }; };
-    telCols.forEach(c => {
-      const cels = leer(c).map(v => String(v).replace(/\D/g, ''));
-      cels.forEach((v, i) => { if (v && v.indexOf(qd) >= 0) anota(i, 1, c); });                    // rápido: contiene
-    });
-    if (!Object.keys(best).length && qd.length >= 7) {                                              // si no hay, aproximado
-      telCols.forEach(c => leer(c).forEach((v, i) => { const s = numScore_(qd, v); if (s >= 0.8) anota(i, s, c); }));
+// ====== Índice en caché ======
+// Cada fila del índice: [fila, id, dni, "tel1,tel2,...", nombreNormalizado]
+function construirIndice_() {
+  const sh = hoja_();
+  const c = columnas_(sh);
+  if (!c.col.id) throw new Error('No se encontró la columna ID PROMETEO');
+  const lastRow = sh.getLastRow(), n = Math.max(0, lastRow - 1);
+  const leer = k => k && n ? sh.getRange(2, k, n, 1).getDisplayValues() : null;
+  const ids = leer(c.col.id), noms = leer(c.col.nombre), docs = leer(c.col.dni);
+  const tels = c.tel.map(leer);
+  const filas = [];
+  for (let i = 0; i < n; i++) {
+    const id = String(ids[i][0]).replace(/\D/g, '');
+    if (!id) continue;
+    const t = tels.map(arr => String(arr[i][0]).replace(/\D/g, '')).filter(Boolean).join(',');
+    filas.push([i + 2, id, docs ? String(docs[i][0]).replace(/\D/g, '') : '', t, noms ? norm_(noms[i][0]) : '']);
+  }
+  return { filas, creado: Date.now(), tel: c.tel, col: c.col };
+}
+function guardarIndice_(idx) {
+  const cache = CacheService.getScriptCache();
+  const texto = idx.filas.map(f => f.join('\t')).join('\n');
+  const zip = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(texto, 'text/plain')).getBytes());
+  const TAM = 95000, partes = {};
+  let k = 0;
+  for (let i = 0; i < zip.length; i += TAM) partes['idx_' + (k++)] = zip.slice(i, i + TAM);
+  partes['idx_meta'] = JSON.stringify({ partes: k, filas: idx.filas.length, creado: idx.creado });
+  const exp = Math.min(21600, MINUTOS_INDICE * 60 * 3);
+  const keys = Object.keys(partes).filter(x => x !== 'idx_meta');
+  try {
+    for (let i = 0; i < keys.length; i += 900) {
+      const lote = {}; keys.slice(i, i + 900).forEach(x => lote[x] = partes[x]);
+      cache.putAll(lote, exp);
     }
-    scored = Object.keys(best).map(i => ({ i: Number(i), s: best[i].s, c: best[i].c }));
+    cache.put('idx_meta', partes['idx_meta'], exp);   // la meta se guarda al final: solo si todo entró
+  } catch (err) {
+    console.error('No se pudo guardar el índice en caché: ' + err);
+    PropertiesService.getScriptProperties().setProperty('idx_error', String(err).slice(0, 200));
+  }
+}
+function leerIndice_() {
+  const cache = CacheService.getScriptCache();
+  const meta = cache.get('idx_meta');
+  if (meta) {
+    const m = JSON.parse(meta);
+    const keys = []; for (let i = 0; i < m.partes; i++) keys.push('idx_' + i);
+    const got = cache.getAll(keys);
+    if (keys.every(x => got[x] != null)) {
+      const zip = keys.map(x => got[x]).join('');
+      const texto = Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(zip), 'application/x-gzip')).getDataAsString();
+      return { texto: '\n' + texto + '\n', creado: m.creado };
+    }
+  }
+  const idx = construirIndice_();      // primera vez o caché vencida: más lento
+  guardarIndice_(idx);
+  return { texto: '\n' + idx.filas.map(f => f.join('\t')).join('\n') + '\n', creado: idx.creado };
+}
+
+// Recorre las filas del índice donde aparece "aguja" (búsqueda nativa, sin partir todo el texto)
+function filasCon_(texto, aguja, max, fn) {
+  const vistas = {};
+  let pos = texto.indexOf(aguja), n = 0;
+  while (pos >= 0 && n < max) {
+    const ini = texto.lastIndexOf('\n', pos) + 1;
+    if (!vistas[ini]) {
+      vistas[ini] = 1; n++;
+      const fin = texto.indexOf('\n', pos);
+      fn(texto.slice(ini, fin).split('\t'));
+      pos = texto.indexOf(aguja, fin);
+    } else pos = texto.indexOf(aguja, pos + 1);
+  }
+}
+
+// ====== Búsqueda ======
+function buscar_(field, q, qd) {
+  const idx = leerIndice_(), T = idx.texto;
+  let scored = [];
+  const MAXF = 4000;
+  if (field === 'prom' || field === 'dni') {
+    const k = field === 'prom' ? 1 : 2;
+    filasCon_(T, '\t' + qd + '\t', 50, f => { if (f[k] === qd) scored.push({ r: +f[0], s: 1 }); });           // exacto primero
+    filasCon_(T, qd, MAXF, f => { if (f[k] && f[k] !== qd && f[k].indexOf(qd) >= 0) scored.push({ r: +f[0], s: 0.9 }); });
+  } else if (field === 'cel') {
+    filasCon_(T, qd, MAXF, f => { if (f[3] && f[3].indexOf(qd) >= 0) scored.push({ r: +f[0], s: 1 }); });
+    if (!scored.length && qd.length >= 7) {                                                        // aproximado: mismo inicio
+      filasCon_(T, qd.slice(0, 4), 20000, f => { if (!f[3]) return; let best = 0; f[3].split(',').forEach(t => { const s = numScore_(qd, t); if (s > best) best = s; }); if (best >= 0.8) scored.push({ r: +f[0], s: best }); });
+    }
   } else {
-    if (!col.nombre) return [];
-    const noms = leer(col.nombre);
-    const qn = norm_(q), first = qn.split(' ')[0].slice(0, 3);
-    noms.forEach((v, i) => {
-      const t = norm_(v); if (!t) return;
-      if (t.indexOf(first) < 0 && sim_(first, t.slice(0, 3)) < 0.66) return; // filtro rápido
-      const s = textScore_(qn, t); if (s >= 0.7) scored.push({ i, s });
+    const qn = norm_(q), palabras = qn.split(' ').filter(w => w.length >= 3);
+    const vistos = {};
+    palabras.slice(0, 3).forEach(w => {
+      filasCon_(T, w.slice(0, 3), 30000, f => {
+        if (vistos[f[0]] || !f[4]) return; vistos[f[0]] = 1;
+        const s = textScore_(qn, f[4]); if (s >= 0.7) scored.push({ r: +f[0], s });
+      });
+    });
+  }
+
+  const sh = hoja_();
+  const c = columnas_(sh);
+
+  // Persona agregada después del último índice: búsqueda exacta directa en la hoja
+  if (!scored.length && ((field === 'prom' && qd.length >= 5) || (field === 'dni' && qd.length >= 8) || (field === 'cel' && qd.length === 9))) {
+    const cols = field === 'prom' ? [c.col.id] : field === 'dni' ? [c.col.dni] : c.tel;
+    const patron = qd.split('').join('\\D?');
+    cols.filter(Boolean).forEach(k => {
+      const n = Math.max(1, sh.getLastRow() - 1);
+      sh.getRange(2, k, n, 1).createTextFinder(patron).useRegularExpression(true).findAll().slice(0, 20)
+        .forEach(rg => scored.push({ r: rg.getRow(), s: 1 }));
     });
   }
 
   scored.sort((a, b) => b.s - a.s);
-  scored = scored.slice(0, MAX_RESULTADOS);
+  const vistos = {}; scored = scored.filter(o => vistos[o.r] ? false : (vistos[o.r] = true)).slice(0, MAX_RESULTADOS);
+
   return scored.map(o => {
-    const row = sh.getRange(o.i + 2, 1, 1, lastCol).getDisplayValues()[0];
-    const g = c => c ? String(row[c - 1]).trim() : '';
-    // celular del alumno: columnas de teléfono que NO son de padres; prefiere uno que empiece con 9
-    const propias = telCols.filter(c => !RE_FAMILIAR.test(heads[c - 1])).map(c => g(c).replace(/\D/g, '').slice(-9)).filter(Boolean);
-    const viaFamiliar = field === 'cel' && o.c && RE_FAMILIAR.test(heads[o.c - 1]);
+    const row = sh.getRange(o.r, 1, 1, c.lastCol).getDisplayValues()[0];
+    const g = k => k ? String(row[k - 1]).trim() : '';
+    const propias = c.tel.filter(k => !RE_FAMILIAR.test(c.heads[k - 1])).map(k => g(k).replace(/\D/g, '').slice(-9)).filter(Boolean);
+    let via = '', viaFamiliar = false;
+    if (field === 'cel') {
+      const k = c.tel.find(k => g(k).replace(/\D/g, '').indexOf(qd) >= 0) || c.tel.find(k => numScore_(qd, g(k)) >= 0.8);
+      if (k) { via = c.txt[k - 1]; viaFamiliar = RE_FAMILIAR.test(c.heads[k - 1]); }
+    }
     const tel = (field === 'cel' && !viaFamiliar && propias.find(t => t.indexOf(qd) >= 0)) || propias.find(t => /^9\d{8}$/.test(t)) || propias[0] || '';
     return {
-      id: g(col.id).replace(/\D/g, ''), nombre: g(col.nombre), celular: tel, dni: g(col.dni).replace(/\D/g, ''),
-      asesor: g(col.asesor), subcanal: g(col.subcanal),
-      via: field === 'cel' && o.c ? headsTxt[o.c - 1] : '',    // en qué columna coincidió el teléfono
-      viaFamiliar: !!viaFamiliar,
+      id: g(c.col.id).replace(/\D/g, ''), nombre: g(c.col.nombre), celular: tel, dni: g(c.col.dni).replace(/\D/g, ''),
+      asesor: g(c.col.asesor), subcanal: g(c.col.subcanal),
+      via: via, viaFamiliar: viaFamiliar,
       s: Math.round(o.s * 100) / 100
     };
   });
+}
+
+// Solo encabezados y tamaños, nunca datos de personas
+function diagnostico_() {
+  const t0 = Date.now();
+  const sh = hoja_();
+  const c = columnas_(sh);
+  const nom = k => c.col[k] ? c.txt[c.col[k] - 1] : '(no encontrada)';
+  const meta = CacheService.getScriptCache().get('idx_meta');
+  const m = meta ? JSON.parse(meta) : null;
+  return {
+    pestaña: sh.getName(), filas: sh.getLastRow() - 1, columnas: c.lastCol,
+    encabezados: c.txt.filter(Boolean),
+    detectadas: { id: nom('id'), nombre: nom('nombre'), documento: nom('dni'), asesor: nom('asesor'), subcanal: nom('subcanal'), telefonos: c.tel.map(k => c.txt[k - 1]) },
+    indice: m ? { filas: m.filas, partes: m.partes, minutos: Math.round((Date.now() - m.creado) / 60000) } : 'sin índice (ejecuta "instalar")',
+    errorIndice: PropertiesService.getScriptProperties().getProperty('idx_error') || '',
+    triggers: ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction()),
+    ms: Date.now() - t0
+  };
 }
 
 // ====== Utilidades (mismas reglas de parecido que la página) ======
@@ -184,7 +308,7 @@ function json_(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
 }
 
-/** Ejecuta esta función una vez desde el editor para autorizar los permisos y probar la lectura. */
+/** Prueba rápida desde el editor: muestra columnas detectadas (sin datos de personas). */
 function probar() {
-  console.log(JSON.stringify(buscar_('nombre', 'maria', '')));
+  console.log(JSON.stringify(diagnostico_(), null, 2));
 }

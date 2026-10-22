@@ -123,11 +123,12 @@ function dbError(e){
 }
 
 /* ================= Combos (lista desplegable con búsqueda) ================= */
-function combo(input, pop, getOptions, onPick){
-  let timer=null;
+function combo(input, pop, getOptions, onPick, opts={}){
+  let timer=null; const delay=opts.delay||90;
   let seq=0;
   const render=async()=>{
     const my=++seq;
+    if(opts.loading && opts.loading(input.value)){ pop.innerHTML=`<div class="optgrp">${esc(opts.loading(input.value))}</div>`; pop.hidden=false; pop._groups=[]; }
     const groups=await getOptions(input.value);
     if(my!==seq) return;   // llegó una respuesta vieja
     const html=groups.map(g=>(g.title?`<div class="optgrp">${esc(g.title)}</div>`:"")+g.items.map((o,i)=>`<button type="button" class="opt" data-g="${groups.indexOf(g)}" data-i="${i}"><span>${esc(o.label)}</span>${o.sub?`<small>${esc(o.sub)}</small>`:""}</button>`).join("")).join("");
@@ -135,7 +136,7 @@ function combo(input, pop, getOptions, onPick){
   };
   let hideT=null;
   input.addEventListener("focus",()=>{ clearTimeout(hideT); render(); });
-  input.addEventListener("input",()=>{ clearTimeout(hideT); clearTimeout(timer); timer=setTimeout(render,90); });
+  input.addEventListener("input",()=>{ clearTimeout(hideT); clearTimeout(timer); timer=setTimeout(render,delay); });
   input.addEventListener("blur",()=>{ clearTimeout(timer); hideT=setTimeout(()=>pop.hidden=true,160); });
   pop.addEventListener("mousedown",e=>e.preventDefault());
   pop.addEventListener("click",e=>{ const b=e.target.closest(".opt"); if(!b) return; const o=pop._groups[+b.dataset.g].items[+b.dataset.i]; pop.hidden=true; onPick(o); });
@@ -748,10 +749,11 @@ function bindUI(){
   });
 
   // mundo ↔ carrera
-  combo($("#fProm"),$("#popProm"),baseOptions("prom"),o=>pickBase(o.b,"prom"));
-  combo($("#fNombre"),$("#popNombre"),baseOptions("nombre"),o=>pickBase(o.b,"nombre"));
-  combo($("#fCel"),$("#popCel"),baseOptions("cel"),o=>pickBase(o.b,"cel"));
-  combo($("#fDni"),$("#popDni"),baseOptions("dni"),o=>pickBase(o.b,"dni"));
+  const espera=field=>q=>{ if(!CFG.PROMETEO_URL || /PEGA_AQUI/.test(CFG.PROMETEO_URL)) return ""; const ok= field==="nombre" ? norm(q).length>=4 : digits(q).length>=3; const key=field+"|"+(field==="nombre"?norm(q):digits(q)); return ok && !promCache.has(key) ? "Buscando en la base Prometeo…" : ""; };
+  combo($("#fProm"),$("#popProm"),baseOptions("prom"),o=>pickBase(o.b,"prom"),{delay:450,loading:espera("prom")});
+  combo($("#fNombre"),$("#popNombre"),baseOptions("nombre"),o=>pickBase(o.b,"nombre"),{delay:600,loading:espera("nombre")});
+  combo($("#fCel"),$("#popCel"),baseOptions("cel"),o=>pickBase(o.b,"cel"),{delay:450,loading:espera("cel")});
+  combo($("#fDni"),$("#popDni"),baseOptions("dni"),o=>pickBase(o.b,"dni"),{delay:450,loading:espera("dni")});
   $("#promHint").addEventListener("click",e=>{ const o=e.target.closest("[data-ci]"); if(o) pickBase(chooserItems[+o.dataset.ci], chooserTag); });
   const soloDigitos=(el,max)=>{ const v=digits(el.value).slice(0,max); if(el.value!==v) el.value=v; };
   $("#fCel").addEventListener("input",e=>{ soloDigitos(e.target,9); marcar(e.target,""); }, true);
