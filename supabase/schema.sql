@@ -110,3 +110,76 @@ begin
   begin alter publication supabase_realtime add table public.registros; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.cortes;    exception when duplicate_object then null; end;
 end $$;
+
+-- 4) Nombre Propio ------------------------------------------------
+-- Todo texto libre se guarda como Nombre Propio ("JUAN DE LA CRUZ" → "Juan de la Cruz"),
+-- lo escriba quien lo escriba (página, importación o Table Editor).
+-- No se tocan los catálogos que usa la página: mundo, carrera, grado, confirmo, origen.
+create or replace function public.nombre_propio(t text) returns text
+language plpgsql immutable as $$
+declare
+  w text; r text; salida text := ''; i int;
+  partes text[];
+  particulas constant text[] := array['de','del','y','e','da','di','van','von'];
+  articulos  constant text[] := array['la','las','los','el'];   -- en minúscula solo después de de/del
+  siglas constant text[] := array['ie','iep','iei','iee','ep','ceba','cebe','cetpro','pronoei','ugel','pnp','fap','sac','srl','eirl','ucal','ads','tv','ii','iii','iv','vi','vii','viii','ix','xi','xii','xx','xxi'];
+begin
+  if t is null then return null; end if;
+  t := regexp_replace(btrim(t), '\s+', ' ', 'g');
+  if t = '' then return t; end if;
+  partes := string_to_array(lower(t), ' ');
+  for i in 1 .. array_length(partes, 1) loop
+    w := partes[i];
+    if i > 1 and (w = any(particulas) or (w = any(articulos) and partes[i-1] in ('de','del'))) then
+      r := w;                                                             -- de, del, y · "de la", "de los"
+    elsif w = any(siglas) or w ~ '[[:alpha:]]\.[[:alpha:]]' then r := upper(w);   -- IEP, I.E.P., UGEL, II…
+    else r := initcap(w);                                                 -- Juan, O'Brien, Jean-Pierre
+    end if;
+    salida := salida || case when i > 1 then ' ' else '' end || r;
+  end loop;
+  return salida;
+end $$;
+
+create or replace function public.tg_nombre_propio() returns trigger
+language plpgsql as $$
+begin
+  if tg_table_name = 'registros' then
+    new.nombre      := public.nombre_propio(new.nombre);
+    new.asesor      := public.nombre_propio(new.asesor);
+    new.subcanal    := public.nombre_propio(new.subcanal);
+    new.colegio     := public.nombre_propio(new.colegio);
+    new.distrito    := public.nombre_propio(new.distrito);
+    new.registrador := public.nombre_propio(new.registrador);
+    if jsonb_typeof(new.acomp) = 'array' then
+      new.acomp := coalesce((
+        select jsonb_agg(case when jsonb_typeof(a) = 'object' and a->>'nombre' is not null
+                              then jsonb_set(a, '{nombre}', to_jsonb(public.nombre_propio(a->>'nombre')))
+                              else a end order by n)
+        from jsonb_array_elements(new.acomp) with ordinality as x(a, n)), '[]'::jsonb);
+    end if;
+  elsif tg_table_name = 'colegios' then
+    new.nombre       := public.nombre_propio(new.nombre);
+    new.departamento := public.nombre_propio(new.departamento);
+    new.provincia    := public.nombre_propio(new.provincia);
+    new.distrito     := public.nombre_propio(new.distrito);
+    new.direccion    := public.nombre_propio(new.direccion);
+  elsif tg_table_name = 'eventos' then
+    new.nombre := public.nombre_propio(new.nombre);
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists nombre_propio on public.registros;
+drop trigger if exists nombre_propio on public.colegios;
+drop trigger if exists nombre_propio on public.eventos;
+create trigger nombre_propio before insert or update on public.registros for each row execute function public.tg_nombre_propio();
+create trigger nombre_propio before insert or update on public.colegios  for each row execute function public.tg_nombre_propio();
+create trigger nombre_propio before insert or update on public.eventos   for each row execute function public.tg_nombre_propio();
+
+-- Corrige lo que ya estaba guardado (solo toca las filas que cambian)
+update public.eventos set nombre = nombre where nombre is distinct from public.nombre_propio(nombre);
+update public.colegios set nombre = nombre
+ where nombre is distinct from public.nombre_propio(nombre) or departamento is distinct from public.nombre_propio(departamento)
+    or provincia is distinct from public.nombre_propio(provincia) or distrito is distinct from public.nombre_propio(distrito)
+    or direccion is distinct from public.nombre_propio(direccion);
+update public.registros set nombre = nombre;
