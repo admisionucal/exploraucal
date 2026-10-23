@@ -37,7 +37,8 @@ const COLUMNAS = {
   status:  ['status de gestion', 'estado de gestion', 'status gestion', 'estatus de gestion']
 };
 // El asesor SOLO se entrega si STATUS DE GESTIÓN es uno de estos (se comparan sin tildes ni mayúsculas)
-const STATUS_CON_ASESOR = ['valoracion positiva viva', 'valoracion postiva viva', 'promesa de pago viva'];
+// Se escriben tal como están en la hoja: norm_ los pasa a minúsculas y cambia _ por espacio, igual que al comparar.
+const STATUS_CON_ASESOR = ['VALORES_VALORACIONES_POSITIVAS_VIVA', 'VALORES_PROMESA_DE_PAGO_VIVA'].map(norm_);
 // Si no hay coincidencia exacta, se usa la primera columna que EMPIECE con esto
 const PREFIJOS = { asesor: 'asesor', subcanal: 'subcanal 2', status: 'status de gestion' };
 // Teléfonos: TODAS las columnas cuyo nombre contenga telefono / celular / movil / whatsapp
