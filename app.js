@@ -100,6 +100,7 @@ let sb=null, session=null, me="", channel=null, recuperando=false;
 let eventos=[], eid=null, regs=[];
 let colegios=[], colByCod=new Map(), distritos=[], colLoaded=false, selDist=null;
 let editingId=null, grado=null, acomp=[];
+let idVerificado=false;   // true solo si el ID Prometeo del formulario se confirmó en la base
 let corteHora="", filtro="asis";
 const promCache=new Map(); let promSeq=0;
 
@@ -133,13 +134,14 @@ function combo(input, pop, getOptions, onPick, opts={}){
     const my=++seq;
     const groups=await getOptions(input.value);
     if(my!==seq) return;   // llegó una respuesta vieja
+    if(document.activeElement!==input){ pop.hidden=true; return; }   // ya se pasó a otro campo: no abrir esta lista
     const html=groups.map(g=>(g.title?`<div class="optgrp">${esc(g.title)}</div>`:"")+g.items.map((o,i)=>`<button type="button" class="opt${o.stack?" stack":""}" data-g="${groups.indexOf(g)}" data-i="${i}"><span>${esc(o.label)}</span>${o.sub?`<small>${esc(o.sub)}</small>`:""}</button>`).join("")).join("");
     pop.innerHTML=html; pop.hidden=!html; pop._groups=groups;
   };
   let hideT=null;
   input.addEventListener("focus",()=>{ clearTimeout(hideT); render(); });
   input.addEventListener("input",()=>{ clearTimeout(hideT); clearTimeout(timer); timer=setTimeout(render,delay); });
-  input.addEventListener("blur",()=>{ clearTimeout(timer); hideT=setTimeout(()=>pop.hidden=true,160); });
+  input.addEventListener("blur",()=>{ clearTimeout(timer); seq++; hideT=setTimeout(()=>pop.hidden=true,160); });   // seq++ descarta la búsqueda pendiente
   pop.addEventListener("mousedown",e=>e.preventDefault());
   pop.addEventListener("click",e=>{ const b=e.target.closest(".opt"); if(!b) return; const o=pop._groups[+b.dataset.g].items[+b.dataset.i]; pop.hidden=true; onPick(o); });
   return {render, close(){ pop.hidden=true; }};
@@ -296,7 +298,7 @@ function renderAcomp(){
   $("#addAcomp").querySelectorAll("button").forEach(b=>b.disabled = acomp.length>=3);
 }
 function clearForm(){
-  editingId=null;
+  editingId=null; idVerificado=false;
   ["fNombre","fCel","fDni","fProm","fAsesor","fSubcanal","fCole","fCod","fDistrito","fEgreso","fCarrera"].forEach(id=>$("#"+id).value=""); selDist=null;
   $("#fMundo").value=""; setGrado(null); acomp=[]; renderAcomp(); coleHint(); promHint();
   $("#formTitle").textContent="Nuevo asistente"; $("#formStatus").innerHTML="";
@@ -308,7 +310,9 @@ function loadIntoForm(r){
   editingId=r.id;
   $("#fNombre").value=r.nombre||""; $("#fCel").value=r.celular||""; $("#fDni").value=r.dni||""; $("#fProm").value=r.id_prometeo||""; $("#fAsesor").value=r.asesor||""; $("#fSubcanal").value=r.subcanal||"";
   promHint();
-  if(!r.asesor){ if(r.id_prometeo) autoFillExact("prom", r.id_prometeo); else if(r.celular) autoFillExact("cel", r.celular); }
+  idVerificado=false;
+  // el ID del inscrito puede ya no existir: se confirma en la base cada vez que se abre
+  if(r.id_prometeo) autoFillExact("prom", r.id_prometeo, null, "", {avisarSiNoEsta:true}); else if(r.celular && !r.asesor) autoFillExact("cel", r.celular);
   $("#fMundo").value=MUNDOS.includes(r.mundo)||r.mundo===MUNDO_NO_DEF?r.mundo:""; setCarrera(carreraExacta(r.carrera)||r.carrera||"");
   $("#fCod").value=r.cod_modular||""; $("#fCole").value=r.colegio||""; $("#fDistrito").value=r.distrito||""; selDist=colByCod.get(codMod(r.cod_modular))?._k||null;
   $("#fEgreso").value=r.egreso||""; setGrado(r.grado||null); if(r.egreso) $("#fEgreso").value=r.egreso;
@@ -404,6 +408,7 @@ function setInd(field, estado, texto){
 }
 function busquedaApta(field,q){
   if(!CFG.PROMETEO_URL || /PEGA_AQUI/.test(CFG.PROMETEO_URL)) return false;
+  if(field!=="prom" && idVerificado) return false;   // el ID ya se confirmó en la base: la persona ya está identificada
   return field==="nombre" ? norm(q).length>=4 : digits(q).length>=3;
 }
 async function buscarConIndicador(field,q){
@@ -420,6 +425,7 @@ async function buscarConIndicador(field,q){
 const fmtCel=c=>{ const d=digits(c); return d.length===9 ? d.replace(/(\d{3})(\d{3})(\d{3})/,"$1 $2 $3") : d; };
 function baseOptions(field){
   return async q=>{
+    if(!busquedaApta(field,q)){ setInd(field,""); return []; }
     const r=await buscarConIndicador(field,q);
     if(r.error || !r.items.length) return [];
     const items=r.items.map(b=>{
@@ -434,14 +440,37 @@ function baseOptions(field){
     return [{title:"Base Prometeo",items}];
   };
 }
+/* Llena SOLO los campos vacíos. El campo desde el que se eligió a la persona sí toma el valor completo
+   (ej.: escribiste "juan per" y elegiste "Juan Pérez Gómez"). */
 function pickBase(b, field){
-  $("#fProm").value=b.id; if(b.asesor) $("#fAsesor").value=b.asesor; if(b.subcanal) $("#fSubcanal").value=b.subcanal;
-  const nomActual=$("#fNombre").value.trim();
-  if(b.nombre && (field==="nombre" || !nomActual || (b.nombre.length>nomActual.length && textScore(nomActual,b.nombre)>=0.75))) $("#fNombre").value=b.nombre;
-  // si coincidió por el teléfono de un familiar, no se reemplaza lo que se escribió en Celular
-  if(b.celular && ((field==="cel" && !b.viaFamiliar) || !digits($("#fCel").value))) $("#fCel").value=digits(b.celular).slice(-9);
-  if(b.dni && (field==="dni" || !digits($("#fDni").value))) $("#fDni").value=digits(b.dni);
-  promHint(b, field==="acomp-exact" ? "encontrado por el celular del acompañante" : "");
+  const f=String(field).replace("-exact","");   // prom | nombre | cel | dni | acomp
+  const idActual=digits($("#fProm").value), idNuevo=digits(b.id);
+  // solo se protege un ID ya confirmado en la base; uno a medias, importado o que ya no existe se reemplaza
+  if(idVerificado && idActual && idNuevo && idActual!==idNuevo && !idNuevo.startsWith(idActual) && f!=="prom"){
+    $("#promHint").innerHTML=`<span class="pill warn">Esta coincidencia es el ID ${esc(b.id)}, pero ya está escrito el ID ${esc(idActual)}. No se cambió nada.</span>`;
+    return;
+  }
+  // Se llena si está vacío, si es el campo elegido, o si lo escrito es una parte del dato nuevo
+  // (nombre a medias o con un error de tipeo: "abigail gal" → "Abigail Galecio Ramos"; dígitos incompletos: "9705" → "970523550").
+  const incompleto=(sel,actual,nuevo)=>{
+    if(!actual || nuevo.length<=actual.length) return false;
+    if(sel==="#fNombre") return textScore(actual,nuevo)>=0.85;
+    const a=digits(actual); return !!a && a!==digits(nuevo) && digits(nuevo).includes(a);
+  };
+  // "Sin nombre" (inscrito sin nombre en el Excel) cuenta como vacío
+  const poner=(sel,val,forzar)=>{ const el=$(sel), actual=/^sin nombre$/i.test(el.value.trim()) ? "" : el.value.trim(); if(val && (forzar || !actual || incompleto(sel,actual,String(val)))) el.value=val; };
+  const reemplazaId = f==="prom" || !idVerificado;
+  const cambioId = reemplazaId && idActual && idActual!==idNuevo;   // se eligió a otra persona
+  poner("#fProm", b.id, reemplazaId);
+  // asesor y subcanal van con el ID: si el ID cambió, se reemplazan (aunque vengan vacíos)
+  if(cambioId){ $("#fAsesor").value=b.asesor||""; $("#fSubcanal").value=b.subcanal||""; }
+  else { poner("#fAsesor", b.asesor); poner("#fSubcanal", b.subcanal); }
+  poner("#fNombre", b.nombre, f==="nombre");
+  // si coincidió por el teléfono de un familiar, no se toca lo que se escribió en Celular
+  poner("#fCel", digits(b.celular).slice(-9), f==="cel" && !b.viaFamiliar);
+  poner("#fDni", digits(b.dni), f==="dni");
+  if(digits($("#fProm").value)===idNuevo) idVerificado=true;
+  promHint(b, f==="acomp" ? "encontrado por el celular del acompañante" : "");
 }
 /* Varias coincidencias exactas: se muestran para elegir, no se llena nada solo */
 let chooserItems=[], chooserTag="";
@@ -455,14 +484,19 @@ function promHint(b, nota){
   const h=$("#promHint"); if(!h) return;
   h.innerHTML = b ? `<span class="pill ok">✓ Base Prometeo</span> ID ${esc(b.id)}${b.asesor?` · Asesor: <b>${esc(b.asesor)}</b>`:""}${!b.asesor&&b.status?` · <span class="pill warn">Sin asesor: status ${esc(b.status)}</span>`:""}${b.subcanal?` · Subcanal 2: ${esc(b.subcanal)}`:""}${nota?` · <span class="pill blue">${esc(nota)}</span>`:b.viaFamiliar&&b.via?` · <span class="pill blue">por ${esc(b.via)}</span>`:""}` : "";
 }
-async function autoFillExact(field, value, inputEl, tag){
+async function autoFillExact(field, value, inputEl, tag, opts={}){
   const r = (inputEl || tag==="acomp-exact") ? await prometeoSearch(field,value) : await buscarConIndicador(field,value);
   const v=digits(value), inp=inputEl || $({prom:"#fProm",cel:"#fCel",dni:"#fDni"}[field]);
   // en teléfono basta con que el número exista en alguna columna (alumno o familiar): el script ya filtró
   const exactas=r.items.filter(b=> field==="prom" ? digits(b.id)===v : field==="dni" ? digits(b.dni)===v : b.s===1);
   // un mismo ID puede repetirse en varias filas: se cuentan IDs distintos
   const ids=[...new Map(exactas.map(b=>[b.id+"|"+(b.asesor||""),b])).values()];
-  if(!ids.length || digits(inp.value)!==v) return;
+  if(digits(inp.value)!==v) return;
+  if(!ids.length){
+    if(opts.avisarSiNoEsta && !r.error && field==="prom")
+      $("#promHint").innerHTML=`<span class="pill warn">El ID ${esc(v)} ya no está en la base Prometeo</span> Búscalo por nombre, DNI o celular para actualizarlo.`;
+    return;
+  }
   if(ids.length===1) pickBase(ids[0], tag || field+"-exact");
   else showChooser(ids, field, tag, v);
 }
@@ -798,10 +832,10 @@ function bindUI(){
   $("#fDni").addEventListener("input",e=>{ soloDigitos(e.target,9); marcar(e.target,""); }, true);
   $("#fCel").addEventListener("blur",e=>{ const c=digits(e.target.value); marcar(e.target, c && !CEL_OK(c) ? `Debe tener 9 dígitos (tiene ${c.length})` : ""); });
   $("#fDni").addEventListener("blur",e=>{ const d=digits(e.target.value); marcar(e.target, d && !DOC_OK(d) ? `Debe tener 8 (DNI) o 9 dígitos (CE)` : ""); });
-  $("#fDni").addEventListener("input",()=>{ const d=digits($("#fDni").value); if(DOC_OK(d) && !digits($("#fProm").value)) autoFillExact("dni",d); });
+  $("#fDni").addEventListener("input",()=>{ const d=digits($("#fDni").value); if(DOC_OK(d) && !idVerificado) autoFillExact("dni",d); });
   let tProm=null;
-  $("#fProm").addEventListener("input",()=>{ promHint(); clearTimeout(tProm); const v=digits($("#fProm").value); if(v.length>=5) tProm=setTimeout(()=>autoFillExact("prom",v),500); });
-  $("#fCel").addEventListener("input",()=>{ const c=digits($("#fCel").value); if(c.length===9 && !digits($("#fProm").value)) autoFillExact("cel",c); });
+  $("#fProm").addEventListener("input",()=>{ idVerificado=false; promHint(); clearTimeout(tProm); const v=digits($("#fProm").value); if(v.length>=5) tProm=setTimeout(()=>autoFillExact("prom",v),500); });
+  $("#fCel").addEventListener("input",()=>{ const c=digits($("#fCel").value); if(c.length===9 && !idVerificado) autoFillExact("cel",c); });
   const cCar=combo($("#fCarrera"),$("#popCarrera"),carreraOptions,o=>setCarrera(o.value));
   $("#fCarrera").addEventListener("change",()=>{ const c=carreraParecida($("#fCarrera").value); if(c) setCarrera(c); });
   $("#fMundo").addEventListener("change",()=>{ const c=carreraExacta($("#fCarrera").value); if(c && c!==NO_DEF && CARRERAS[c]!==$("#fMundo").value && $("#fMundo").value) $("#fCarrera").value=""; $("#fCarrera").focus(); });
@@ -817,7 +851,7 @@ function bindUI(){
   const accSync=e=>{ const el=e.target; if(el.dataset.i==null) return;
     if(el.dataset.k==="celular"){ const v=digits(el.value).slice(0,9); if(el.value!==v) el.value=v; }
     acomp[+el.dataset.i][el.dataset.k]=el.value;
-    if(e.type==="input" && el.dataset.k==="celular"){ const c=digits(el.value); if(c.length===9 && !digits($("#fProm").value)) autoFillExact("cel",c,el,"acomp-exact"); } };
+    if(e.type==="input" && el.dataset.k==="celular"){ const c=digits(el.value); if(c.length===9 && !idVerificado) autoFillExact("cel",c,el,"acomp-exact"); } };
   $("#acompList").addEventListener("input",accSync); $("#acompList").addEventListener("change",accSync);
   $("#acompList").addEventListener("click",e=>{ const b=e.target.closest("[data-rm]"); if(b){ acomp.splice(+b.dataset.rm,1); renderAcomp(); } });
   $("#btnClear").addEventListener("click",clearForm);
