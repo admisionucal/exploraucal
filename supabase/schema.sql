@@ -53,6 +53,8 @@ create table if not exists public.cortes (
 alter table public.registros add column if not exists distrito text;
 alter table public.registros add column if not exists asesor text;
 alter table public.registros add column if not exists subcanal text;
+alter table public.registros add column if not exists comentario text;
+alter table public.registros add column if not exists ya_alumno boolean not null default false;
 
 
 -- Padrón de colegios (se sube desde la página: Importar > Colegios)

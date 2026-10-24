@@ -35,6 +35,7 @@ const COLS_INSCRITOS = [
   {f:"id_prometeo", label:"ID Prometeo", alias:["id prometeo","prometeo"]},
   {f:"asesor", label:"Asesor", alias:["asesor","asesora","asesor comercial","ejecutivo","promotor","asesor ult tip df sn contc"]},
   {f:"subcanal", label:"Subcanal 2", alias:["subcanal 2","subcanal2","subcanal"]},
+  {f:"ya_alumno", label:"Ya es alumno UCAL", hint:"Si / No; cuenta como no vendible", alias:["ya es alumno ucal","ya es alumno","alumno ucal","ya alumno ucal","ya alumno"]},
   {f:"carrera", label:"Carrera", alias:["carrera","carrera de interes"]},
   {f:"mundo", label:"Mundo", alias:["mundo"]},
   {f:"grado", label:"¿En qué grado está?", alias:["en que grado esta","grado"]},
@@ -43,6 +44,7 @@ const COLS_INSCRITOS = [
   {f:"colegio", label:"Nombre Colegio", alias:["nombre colegio","colegio","centro educativo"]},
   {f:"distrito", label:"Distrito", alias:["distrito"]},
   {f:"confirmo", label:"¿Confirmó asistencia?", alias:["confirmo asistencia","confirmo"]},
+  {f:"comentario", label:"Comentario", alias:["comentario","comentarios","observacion","observaciones","nota","notas"]},
   {f:"registrador", label:"Registrador", hint:"si viene lleno, se carga como que ya llegó", alias:["registrador"]},
   {f:"acomp", label:"¿Quien es? / Nombres y apellidos del acompañante / Celular del acompañante", hint:"también con 2 y 3", alias:[]}
 ];
@@ -74,6 +76,16 @@ function lev(a,b){
   return prev[b.length];
 }
 const sim = (a,b) => { const m=Math.max(a.length,b.length); return m ? 1-lev(a,b)/m : 0; };
+/* ¿Dos nombres son la misma persona? Más estricto que "parecido": los hermanos comparten apellidos
+   y celular, así que el primer nombre debe coincidir (o uno contener al otro). "Sin nombre" coincide con cualquiera. */
+function mismaPersona(a,b){
+  const x=norm(a), y=norm(b); if(!x||!y) return false;
+  if(x==="sin nombre"||y==="sin nombre") return true;
+  if(x.includes(y)||y.includes(x)) return true;
+  const fx=x.split(" ")[0], fy=y.split(" ")[0];
+  if(fx!==fy && sim(fx,fy)<0.8) return false;
+  return Math.max(textScore(a,b),textScore(b,a))>=0.75;
+}
 /* Parecido de texto 0..1: cada palabra buscada contra la palabra más parecida del nombre */
 function textScore(q, target){
   const qn=norm(q), tn=norm(target); if(!qn||!tn) return 0;
@@ -122,7 +134,7 @@ function dbError(e){
   const m=String(e?.message||"");
   if(/row-level security|permission|JWT/i.test(m)) toast("Sin permiso: inicia sesión con tu correo @"+(CFG.DOMINIO||"ucal.edu.pe"),"bad");
   else if(/Failed to fetch|NetworkError/i.test(m)) toast("Sin conexión. Revisa el internet e intenta de nuevo.","bad");
-  else if(/distrito|colegios|asesor|subcanal/i.test(m) && /column|relation|does not exist/i.test(m)) toast("Falta actualizar la base: vuelve a correr schema.sql en Supabase.","bad");
+  else if(/distrito|colegios|asesor|subcanal|comentario|ya_alumno/i.test(m) && /column|relation|does not exist/i.test(m)) toast("Falta actualizar la base: vuelve a correr schema.sql en Supabase.","bad");
   else toast("No se pudo guardar: "+m,"bad");
 }
 
@@ -153,6 +165,14 @@ function corteLimit(){
   const day = curEvent()?.fecha || new Date().toISOString().slice(0,10);
   return new Date(day+"T"+corteHora+":59");
 }
+/* Grupo del alumno en el corte. Ya es alumno UCAL → no vendible, sin importar el grado. */
+function catAlumno(r){
+  if(r.ya_alumno) return "nv";
+  if(r.grado==="Ya acabo el colegio") return "egresados";
+  if(r.grado==="5to") return "quinto";
+  if(r.grado==="3ero"||r.grado==="4to") return "nv";
+  return "singrado";
+}
 function computeCorte(limit){
   const cols=[...MUNDOS];
   if(regs.some(r=>r.asistio && !MUNDOS.includes(r.mundo))) cols.push(MUNDO_NO_DEF);
@@ -163,19 +183,16 @@ function computeCorte(limit){
     if(!r.asistio) continue;
     if(limit && r.hora && new Date(r.hora) > limit) continue;
     const m = MUNDOS.includes(r.mundo) ? r.mundo : MUNDO_NO_DEF;
-    if(r.grado==="Ya acabo el colegio") t.egresados[m]++;
-    else if(r.grado==="5to") t.quinto[m]++;
-    else if(r.grado==="3ero"||r.grado==="4to") t.nv[m]++;
-    else t.singrado[m]++;
+    const cat=catAlumno(r); t[cat][m]++;
     for(const a of (r.acomp||[])){ if(PADRES.has(a.tipo)) t.padres[m]++; else t.otros[m]++; }
     const cn=CARRERAS[r.carrera] ? r.carrera : NO_DEF;          // "No definido" se agrupa dentro de su mundo
     const ck=cn+"|"+(CARRERAS[cn]||m);
     const k=car[ck]=car[ck]||{carrera:cn,mundo:CARRERAS[cn]||m,padres:0,otros:0,egresados:0,quinto:0,nv:0,singrado:0};
-    if(r.grado==="Ya acabo el colegio") k.egresados++; else if(r.grado==="5to") k.quinto++; else if(r.grado==="3ero"||r.grado==="4to") k.nv++; else k.singrado++;
+    k[cat]++;
     for(const a of (r.acomp||[])){ if(PADRES.has(a.tipo)) k.padres++; else k.otros++; }
     const ak=(r.asesor||"").trim()||"Sin asesor";
     const ka=ase[ak]=ase[ak]||{asesor:ak,padres:0,otros:0,egresados:0,quinto:0,nv:0,singrado:0};
-    if(r.grado==="Ya acabo el colegio") ka.egresados++; else if(r.grado==="5to") ka.quinto++; else if(r.grado==="3ero"||r.grado==="4to") ka.nv++; else ka.singrado++;
+    ka[cat]++;
     for(const a of (r.acomp||[])){ if(PADRES.has(a.tipo)) ka.padres++; else ka.otros++; }
   }
   const byAsesor=Object.values(ase).map(k=>({...k,total:k.padres+k.otros+k.egresados+k.quinto+k.nv+k.singrado}))
@@ -299,8 +316,8 @@ function renderAcomp(){
 }
 function clearForm(){
   editingId=null; idVerificado=false;
-  ["fNombre","fCel","fDni","fProm","fAsesor","fSubcanal","fCole","fCod","fDistrito","fEgreso","fCarrera"].forEach(id=>$("#"+id).value=""); selDist=null;
-  $("#fMundo").value=""; setGrado(null); acomp=[]; renderAcomp(); coleHint(); promHint();
+  ["fNombre","fCel","fDni","fProm","fAsesor","fSubcanal","fCole","fCod","fDistrito","fEgreso","fCarrera","fComentario"].forEach(id=>$("#"+id).value=""); selDist=null;
+  $("#fMundo").value=""; $("#fYaAlumno").checked=false; setGrado(null); acomp=[]; renderAcomp(); coleHint(); promHint();
   $("#formTitle").textContent="Nuevo asistente"; $("#formStatus").innerHTML="";
   Object.keys(IND).forEach(f=>{ indSeq[f]=(indSeq[f]||0)+1; setInd(f,""); });
   document.querySelectorAll("#regForm .err").forEach(f=>f.classList.remove("err")); document.querySelectorAll("#regForm .errmsg").forEach(m=>m.textContent="");
@@ -317,6 +334,7 @@ function loadIntoForm(r){
   $("#fCod").value=r.cod_modular||""; $("#fCole").value=r.colegio||""; $("#fDistrito").value=r.distrito||""; selDist=colByCod.get(codMod(r.cod_modular))?._k||null;
   $("#fEgreso").value=r.egreso||""; setGrado(r.grado||null); if(r.egreso) $("#fEgreso").value=r.egreso;
   if(r.cod_modular && !r.colegio) fillFromCod(); coleHint();
+  $("#fComentario").value=r.comentario||""; $("#fYaAlumno").checked=!!r.ya_alumno;
   acomp=(r.acomp||[]).map(a=>({...a})); renderAcomp();
   $("#formTitle").textContent = r.asistio ? "Editar asistente" : "Inscrito: revisa sus datos y registra la llegada";
   $("#formStatus").innerHTML = r.asistio ? `<span class="pill ok">Llegó ${fmtHora(r.hora)}</span>` : `<span class="pill pend">Inscrito${r.confirmo==="Si"?" · confirmó":""}</span>`;
@@ -344,7 +362,7 @@ function validar(nombre,cel,dni,carrera){
   else if(!CEL_OK(cel)) add($("#fCel"),`El celular debe tener 9 dígitos (tiene ${cel.length})`);
   if(dni && !DOC_OK(dni)) add($("#fDni"),`El documento debe tener 8 (DNI) o 9 dígitos (CE); tiene ${dni.length}`);
   if(!carrera) add($("#fCarrera"),"Elige la carrera de la lista");
-  if(!grado) add($("#segGrado"),"Marca el grado");
+  if(!grado && !$("#fYaAlumno").checked) add($("#segGrado"),"Marca el grado (o marca «Ya es alumno UCAL»)");
   acomp.forEach((a,i)=>{ const c=digits(a.celular); if(c && !CEL_OK(c)) add($(`#acompList [data-i="${i}"][data-k="celular"]`),`Celular del acompañante ${i+1}: debe tener 9 dígitos`); });
   return out;
 }
@@ -356,14 +374,17 @@ async function saveForm(ev){
   const errs=validar(nombre,cel,dni,carrera);
   if(errs.length){ toast(errs[0].msg+(errs.length>1?` (y ${errs.length-1} más)`:""),"bad"); errs[0].el?.focus(); return; }
   if(!editingId){
-    const dup=regs.find(r=>digits(r.celular)===cel || (dni && digits(r.dni)===dni));
+    // mismo documento = misma persona; mismo celular solo si el nombre también coincide (los hermanos comparten celular)
+    const dup=regs.find(r=>dni && digits(r.dni)===dni) || regs.find(r=>digits(r.celular)===cel && mismaPersona(r.nombre,nombre));
     if(dup){ toast(dup.asistio?`${dup.nombre} ya llegó (${fmtHora(dup.hora)}). Revisa sus datos.`:`${dup.nombre} ya estaba inscrito. Revisa y registra.`, dup.asistio?"bad":""); loadIntoForm(dup); return; }
   }
   const prev = editingId ? regs.find(r=>r.id===editingId) : null;
+  const hermano = regs.find(r=>r.id!==editingId && digits(r.celular)===cel && !mismaPersona(r.nombre,nombre));
   const data={
     evento_id:eid, nombre, celular:cel, dni, id_prometeo:digits($("#fProm").value), asesor:$("#fAsesor").value.trim(), subcanal:$("#fSubcanal").value.trim(),
     carrera, mundo: carrera===NO_DEF ? (MUNDOS.includes($("#fMundo").value) ? $("#fMundo").value : MUNDO_NO_DEF) : CARRERAS[carrera], grado, egreso:Number($("#fEgreso").value)||null,
     colegio:$("#fCole").value.trim(), cod_modular:codMod($("#fCod").value), distrito:$("#fDistrito").value.trim(),
+    comentario:$("#fComentario").value.trim(), ya_alumno:$("#fYaAlumno").checked,
     acomp:acomp.filter(a=>a.nombre.trim()||a.celular.trim()).map(a=>({tipo:a.tipo,nombre:a.nombre.trim(),celular:digits(a.celular)})),
     confirmo:prev?.confirmo||"", origen:prev?.origen||"walkin",
     registrador: prev?.asistio ? (prev.registrador||me) : me,
@@ -376,7 +397,7 @@ async function saveForm(ev){
     const {data:row,error}=await q.select().single();
     if(error) throw error;
     upsertLocal(regs,row); renderAll();
-    toast(prev?.asistio ? "Cambios guardados" : `Llegada registrada: ${nombre}${data.acomp.length?` + ${data.acomp.length}`:""}`,"ok");
+    toast(prev?.asistio ? "Cambios guardados" : `Llegada registrada: ${nombre}${data.acomp.length?` + ${data.acomp.length}`:""}${hermano?` (mismo celular que ${hermano.nombre})`:""}`,"ok");
     clearForm(); window.scrollTo({top:0,behavior:"smooth"});
   }catch(e){ dbError(e); }
   finally{ $("#btnSave").disabled=false; }
@@ -477,7 +498,7 @@ let chooserItems=[], chooserTag="";
 function showChooser(items, field, tag, v){
   chooserItems=items; chooserTag=tag||field+"-exact";
   const que = field==="dni" ? `El documento ${v}` : field==="prom" ? `El ID ${v}` : tag==="acomp-exact" ? `El celular del acompañante (${v})` : `El celular ${v}`;
-  $("#promHint").innerHTML=`<div class="chooser"><div class="chooser-t"><span class="pill warn">${items.length} coincidencias</span> ${esc(que)} está en ${items.length} registros de la base Prometeo. Elige el que corresponde:</div>
+  $("#promHint").innerHTML=`<div class="chooser"><div class="chooser-t">${items.length>1?`<span class="pill warn">${items.length} coincidencias</span> ${esc(que)} está en ${items.length} registros de la base Prometeo. Elige el que corresponde:`:`<span class="pill warn">¿Es la misma persona?</span> ${esc(que)} está en la base Prometeo. Puede ser esta persona o un hermano: si es la misma, elígela; si no, sigue llenando.`}</div>
     <div class="chooser-list">${items.map((b,i)=>`<button type="button" class="chooser-opt" data-ci="${i}"><b>${esc(b.nombre||"Sin nombre")}</b><span>ID ${esc(b.id)}${b.asesor?` · ${esc(b.asesor)}`:""}${b.subcanal?` · ${esc(b.subcanal)}`:""}</span>${b.via?`<small>coincide en ${esc(b.via)}</small>`:b.dni?`<small>Doc. ${esc(b.dni)}</small>`:""}</button>`).join("")}</div></div>`;
 }
 function promHint(b, nota){
@@ -497,6 +518,9 @@ async function autoFillExact(field, value, inputEl, tag, opts={}){
       $("#promHint").innerHTML=`<span class="pill warn">El ID ${esc(v)} ya no está en la base Prometeo</span> Búscalo por nombre, DNI o celular para actualizarlo.`;
     return;
   }
+  // por celular puede ser un hermano: solo se llena solo si el nombre escrito coincide; si no, se pregunta
+  const nom=$("#fNombre").value.trim();
+  if(field==="cel" && ids.length===1 && !(nom && mismaPersona(nom, ids[0].nombre))) return showChooser(ids, field, tag, v);
   if(ids.length===1) pickBase(ids[0], tag || field+"-exact");
   else showChooser(ids, field, tag, v);
 }
@@ -592,8 +616,8 @@ function renderLista(){
   $("#listaTable").innerHTML=`<thead><tr><th>Llegada</th><th>ID Prometeo</th><th>Asesor</th><th>Subcanal 2</th><th>Nombres y apellidos</th><th>Celular</th><th>Carrera</th><th>Mundo</th><th>Grado</th><th>Colegio</th><th>Acompañantes</th><th>Registrador</th><th></th></tr></thead><tbody>${
     rows.map(r=>`<tr>
       <td>${r.asistio?`<span class="pill ok">${fmtHora(r.hora)}</span>`:`<span class="pill pend">${r.confirmo==="Si"?"Confirmó":"Pendiente"}</span>`}</td>
-      <td class="num">${esc(r.id_prometeo||"—")}</td><td>${esc(r.asesor||"—")}</td><td>${esc(r.subcanal||"—")}</td>
-      <td class="tw">${esc(r.nombre)}</td><td class="num">${esc(r.celular)}</td><td>${esc(r.carrera||"—")}</td><td>${esc(r.mundo||"—")}</td>
+      <td class="num">${esc(r.id_prometeo||"—")}</td><td>${esc(r.asesor||"—")}</td><td>${esc(r.subcanal||"—")}${r.ya_alumno?`<div><span class="pill blue">Alumno UCAL</span></div>`:""}</td>
+      <td class="tw">${esc(r.nombre)}${r.comentario?`<div class="hint">${esc(r.comentario)}</div>`:""}</td><td class="num">${esc(r.celular)}</td><td>${esc(r.carrera||"—")}</td><td>${esc(r.mundo||"—")}</td>
       <td>${r.grado?`<span class="pill g-${r.grado==="Ya acabo el colegio"?"eg":r.grado==="5to"?"q5":"nv"}">${esc(gradoLabel(r.grado))}</span>`:"—"}</td>
       <td class="tw">${esc(r.colegio||"—")}${r.distrito?`<div class="hint">${esc(r.distrito)}</div>`:""}</td>
       <td class="tw">${(r.acomp||[]).map(a=>esc(a.tipo)+(a.nombre?": "+esc(a.nombre):"")).join("<br>")||"—"}</td>
@@ -703,19 +727,20 @@ async function importInscritos(file){
       evento_id:eid, nombre:get(r,"nombre"), celular:digits(get(r,"celular")), dni:digits(get(r,"dni")), id_prometeo:idp,
       carrera, mundo, grado: !g?"": g.startsWith("ya")||g.includes("egres")?"Ya acabo el colegio": g.startsWith("5")?"5to": g.startsWith("4")?"4to": g.startsWith("3")?"3ero": get(r,"grado"),
       egreso:Number(digits(get(r,"egreso")))||null, cod_modular:cod, colegio:get(r,"colegio")||col?.nombre||"", distrito:get(r,"distrito")||col?.distrito||"",
-      asesor:get(r,"asesor"), subcanal:get(r,"subcanal"), confirmo: norm(get(r,"confirmo"))==="si"?"Si":(get(r,"confirmo")?"No":""), registrador:regis, acomp:acompArr,
+      asesor:get(r,"asesor"), subcanal:get(r,"subcanal"), confirmo: norm(get(r,"confirmo"))==="si"?"Si":(get(r,"confirmo")?"No":""), comentario:get(r,"comentario"), ya_alumno:/^(si|s|x|1|true|verdadero)$/.test(norm(get(r,"ya_alumno"))), registrador:regis, acomp:acompArr,
       asistio:!!regis, hora:null, origen:"import"
     };
   }).filter(r=>r.nombre);
   // Misma persona = mismo celular o DNI y nombre parecido. Se combinan en un solo registro.
-  const FIELDS=["celular","dni","id_prometeo","asesor","subcanal","carrera","mundo","grado","egreso","cod_modular","colegio","distrito","confirmo"];
+  const FIELDS=["celular","dni","id_prometeo","asesor","subcanal","carrera","mundo","grado","egreso","cod_modular","colegio","distrito","confirmo","comentario","ya_alumno"];
   const keysOf=r=>[r.celular&&"c"+r.celular, r.dni&&"d"+r.dni].filter(Boolean);
   const samePerson=(a,b)=>Math.max(textScore(a.nombre,b.nombre),textScore(b.nombre,a.nombre))>=0.6;
   const index=new Map(); const addIdx=r=>keysOf(r).forEach(k=>{ if(!index.has(k)) index.set(k,[]); index.get(k).push(r); });
   regs.forEach(addIdx);
   const nuevos=[], cambiados=new Set(); let combinados=0;
   for(const r of recs){
-    const match=keysOf(r).flatMap(k=>index.get(k)||[]).find(x=>samePerson(x,r));
+    // mismo documento y nombre parecido, o mismo celular y mismo nombre (si solo comparten celular son hermanos: no se combinan)
+    const match=(r.dni && (index.get("d"+r.dni)||[]).find(x=>samePerson(x,r))) || (r.celular && (index.get("c"+r.celular)||[]).find(x=>mismaPersona(x.nombre,r.nombre)));
     if(!match){ nuevos.push(r); addIdx(r); continue; }
     combinados++;
     const fuente = r.asistio && !match.asistio;   // la fila del registrador manda
@@ -769,17 +794,17 @@ async function importColegios(file){
 
 /* ================= Exportar ================= */
 function regsSheet(){
-  const H=["Registrador","ID Prometeo","Asesor","Subcanal 2","Nombres y Apellidos","Documento (DNI/CE)","Celular","Carrera","Mundo","¿Confirmó asistencia?","Cod Modular","Nombre Colegio","¿En qué grado está?","Año egreso de cole"];
+  const H=["Registrador","ID Prometeo","Asesor","Subcanal 2","Nombres y Apellidos","Documento (DNI/CE)","Celular","Carrera","Mundo","¿Confirmó asistencia?","Cod Modular","Nombre Colegio","¿En qué grado está?","Año egreso de cole","Ya es alumno UCAL","Comentario"];
   for(const s of [""," 2"," 3"]) H.push("¿Tiene acompañante?"+s,"¿Quien es?"+s,"Nombres y apellidos del acompañante"+s,"Celular del acompañante"+s);
   H.push("Distrito colegio","Asistió","Hora de llegada");
   const num=v=>v&&/^\d+$/.test(v)&&!/^0/.test(v)?Number(v):(v||"");
   const data=[...regs].sort((a,b)=>String(a.nombre).localeCompare(b.nombre)).map(r=>{
-    const row=[r.asistio?r.registrador:"",num(r.id_prometeo),r.asesor||"",r.subcanal||"",r.nombre,num(r.dni),num(r.celular),r.carrera,r.mundo,r.confirmo||"",r.cod_modular||"",r.colegio,r.grado,r.egreso||""];
+    const row=[r.asistio?r.registrador:"",num(r.id_prometeo),r.asesor||"",r.subcanal||"",r.nombre,num(r.dni),num(r.celular),r.carrera,r.mundo,r.confirmo||"",r.cod_modular||"",r.colegio,r.grado,r.egreso||"",r.ya_alumno?"Si":"No",r.comentario||""];
     for(let i=0;i<3;i++){ const a=(r.acomp||[])[i]; row.push(a?"Si":"",a?a.tipo:"",a?a.nombre:"",a?num(a.celular):""); }
     row.push(r.distrito||"", r.asistio?"Si":"No", r.hora?new Date(r.hora).toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit",hour12:false}):"");
     return row;
   });
-  const ws=XLSX.utils.aoa_to_sheet([H,...data]); ws["!cols"]=H.map((h,i)=>({wch:i===4||i===11?32:16})); return ws;
+  const ws=XLSX.utils.aoa_to_sheet([H,...data]); ws["!cols"]=H.map((h,i)=>({wch:i===4||i===11?32:h==="Comentario"?40:16})); return ws;
 }
 function corteSheet(){
   const ev=curEvent(); const c=computeCorte(corteLimit()); const cc=carreraCols(c);
@@ -788,7 +813,7 @@ function corteSheet(){
     ["Total","",...cc.map(([f])=>c.byCarrera.reduce((a,x)=>a+x[f],0))],[],
     ["Por asesor"],["Asesor","",...cc.map(([,l])=>l)],...c.byAsesor.map(k=>[k.asesor,"",...cc.map(([f])=>k[f])]),
     ["Total","",...cc.map(([f])=>c.byAsesor.reduce((a,x)=>a+x[f],0))],[],
-    ["* Alumnos egresados: ya acabaron el colegio."],["* No vendibles: 3ero o 4to de secundaria."],["* Padres: acompañantes registrados como madre, padre o familiar."]];
+    ["* Alumnos egresados: ya acabaron el colegio."],["* No vendibles: 3ero o 4to de secundaria, o ya son alumnos UCAL."],["* Padres: acompañantes registrados como madre, padre o familiar."]];
   const ws=XLSX.utils.aoa_to_sheet(aoa); ws["!cols"]=[{wch:38},{wch:40},...cc.map(()=>({wch:18}))]; return ws;
 }
 function exportXlsx(){
